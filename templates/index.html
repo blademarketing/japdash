@@ -21,6 +21,9 @@
                         <button id="historyTab" class="px-4 py-2 text-sm font-medium text-gray-500 border-b-2 border-transparent hover:text-gray-700">
                             <i class="fas fa-history mr-2"></i>History
                         </button>
+                        <button id="logsTab" class="px-4 py-2 text-sm font-medium text-gray-500 border-b-2 border-transparent hover:text-gray-700">
+                            <i class="fas fa-file-alt mr-2"></i>Logs
+                        </button>
                     </div>
                 </div>
                 <div class="flex gap-3">
@@ -159,6 +162,121 @@
                         <button id="historyNextBtn" class="px-3 py-1 text-sm border rounded hover:bg-gray-50 disabled:opacity-50" disabled>
                             Next
                         </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Logs Tab Content -->
+            <div id="logsContent" class="hidden">
+                <!-- RSS Service Status -->
+                <div class="mb-6 p-4 bg-blue-50 rounded-lg border">
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <h3 class="font-semibold text-blue-800">RSS Polling Service</h3>
+                            <p id="rssServiceStatus" class="text-sm text-blue-600">Checking status...</p>
+                        </div>
+                        <div class="flex gap-2">
+                            <button id="startRSSBtn" class="bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded text-sm transition-colors">
+                                <i class="fas fa-play mr-1"></i>Start
+                            </button>
+                            <button id="stopRSSBtn" class="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded text-sm transition-colors">
+                                <i class="fas fa-stop mr-1"></i>Stop
+                            </button>
+                            <button id="pollNowBtn" class="bg-orange-500 hover:bg-orange-600 text-white px-3 py-1 rounded text-sm transition-colors">
+                                <i class="fas fa-sync mr-1"></i>Poll Now
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Summary Stats -->
+                <div id="logsSummary" class="mb-6 grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <!-- Stats will be loaded here -->
+                </div>
+
+                <!-- Log Type Tabs -->
+                <div class="mb-6">
+                    <div class="flex gap-4 border-b">
+                        <button id="rssLogsTab" class="px-4 py-2 text-sm font-medium text-blue-600 border-b-2 border-blue-600">
+                            RSS Polling
+                        </button>
+                        <button id="executionLogsTab" class="px-4 py-2 text-sm font-medium text-gray-500 border-b-2 border-transparent hover:text-gray-700">
+                            Executions
+                        </button>
+                        <button id="accountLogsTab" class="px-4 py-2 text-sm font-medium text-gray-500 border-b-2 border-transparent hover:text-gray-700">
+                            Accounts
+                        </button>
+                    </div>
+                </div>
+
+                <!-- RSS Polling Logs -->
+                <div id="rssLogsContent">
+                    <div class="overflow-x-auto">
+                        <table class="w-full table-auto text-sm">
+                            <thead>
+                                <tr class="bg-gray-100">
+                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Time</th>
+                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Feed</th>
+                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Account</th>
+                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Posts Found</th>
+                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">New Posts</th>
+                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Actions</th>
+                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="rssLogsTable" class="divide-y divide-gray-200">
+                                <!-- RSS logs will be loaded here -->
+                            </tbody>
+                        </table>
+                    </div>
+                    <div id="emptyRSSLogs" class="hidden text-center py-12">
+                        <i class="fas fa-rss text-gray-400 text-6xl mb-4"></i>
+                        <h3 class="text-xl text-gray-600 mb-2">No RSS polling logs</h3>
+                        <p class="text-gray-500 mb-4">RSS polling will appear here once started</p>
+                    </div>
+                </div>
+
+                <!-- Execution Logs -->
+                <div id="executionLogsContent" class="hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full table-auto text-sm">
+                            <thead>
+                                <tr class="bg-gray-100">
+                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Time</th>
+                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Type</th>
+                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Platform</th>
+                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Account</th>
+                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Service</th>
+                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Status</th>
+                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Order ID</th>
+                                </tr>
+                            </thead>
+                            <tbody id="executionLogsTable" class="divide-y divide-gray-200">
+                                <!-- Execution logs will be loaded here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Account Logs -->
+                <div id="accountLogsContent" class="hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full table-auto text-sm">
+                            <thead>
+                                <tr class="bg-gray-100">
+                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Created</th>
+                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Platform</th>
+                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Username</th>
+                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">RSS Status</th>
+                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Actions</th>
+                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Last Check</th>
+                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Last Post</th>
+                                </tr>
+                            </thead>
+                            <tbody id="accountLogsTable" class="divide-y divide-gray-200">
+                                <!-- Account logs will be loaded here -->
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>

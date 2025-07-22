@@ -1047,6 +1047,182 @@ def refresh_account_rss_status(account_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# Logging and Activity Endpoints
+
+@app.route('/api/logs/rss-polling')
+def get_rss_polling_logs():
+    """Get RSS polling activity logs"""
+    try:
+        conn = get_db_connection()
+        
+        # Get query parameters
+        limit = int(request.args.get('limit', 50))
+        offset = int(request.args.get('offset', 0))
+        
+        # Get RSS polling logs with feed information
+        logs = conn.execute('''
+            SELECT 
+                rpl.*,
+                rf.title as feed_title,
+                a.username as account_username,
+                a.platform as account_platform
+            FROM rss_poll_log rpl
+            LEFT JOIN rss_feeds rf ON rpl.feed_id = rf.id
+            LEFT JOIN accounts a ON rf.account_id = a.id
+            ORDER BY rpl.poll_time DESC
+            LIMIT ? OFFSET ?
+        ''', (limit, offset)).fetchall()
+        
+        # Get total count
+        total = conn.execute('SELECT COUNT(*) as count FROM rss_poll_log').fetchone()['count']
+        
+        conn.close()
+        
+        return jsonify({
+            'logs': [dict(log) for log in logs],
+            'total': total,
+            'limit': limit,
+            'offset': offset
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/logs/execution-activity')
+def get_execution_activity_logs():
+    """Get recent execution activity with more details"""
+    try:
+        conn = get_db_connection()
+        
+        limit = int(request.args.get('limit', 50))
+        offset = int(request.args.get('offset', 0))
+        
+        # Get execution history with additional context
+        logs = conn.execute('''
+            SELECT 
+                eh.*,
+                CASE 
+                    WHEN eh.execution_type = 'rss_trigger' THEN 'RSS Triggered'
+                    WHEN eh.execution_type = 'instant' THEN 'Manual Execution'
+                    ELSE eh.execution_type
+                END as execution_type_display
+            FROM execution_history eh
+            ORDER BY eh.created_at DESC
+            LIMIT ? OFFSET ?
+        ''', (limit, offset)).fetchall()
+        
+        total = conn.execute('SELECT COUNT(*) as count FROM execution_history').fetchone()['count']
+        
+        conn.close()
+        
+        result = []
+        for log in logs:
+            log_dict = dict(log)
+            log_dict['parameters'] = json.loads(log_dict['parameters']) if log_dict['parameters'] else {}
+            result.append(log_dict)
+        
+        return jsonify({
+            'logs': result,
+            'total': total,
+            'limit': limit,
+            'offset': offset
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/logs/account-activity')
+def get_account_activity_logs():
+    """Get account-related activity logs"""
+    try:
+        conn = get_db_connection()
+        
+        limit = int(request.args.get('limit', 50))
+        
+        # Get recent account creations and RSS feed statuses
+        account_activity = conn.execute('''
+            SELECT 
+                a.id,
+                a.platform,
+                a.username,
+                a.created_at,
+                a.rss_status,
+                a.rss_last_check,
+                a.rss_last_post,
+                COUNT(actions.id) as action_count,
+                'account_created' as activity_type
+            FROM accounts a
+            LEFT JOIN actions ON a.id = actions.account_id
+            GROUP BY a.id
+            ORDER BY a.created_at DESC
+            LIMIT ?
+        ''', (limit,)).fetchall()
+        
+        conn.close()
+        
+        return jsonify({
+            'logs': [dict(log) for log in account_activity]
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/logs/summary')
+def get_logs_summary():
+    """Get summary statistics for the logs dashboard"""
+    try:
+        conn = get_db_connection()
+        
+        # RSS polling summary (last 24 hours)
+        rss_summary = conn.execute('''
+            SELECT 
+                COUNT(*) as total_polls,
+                SUM(posts_found) as total_posts_found,
+                SUM(new_posts) as total_new_posts,
+                SUM(actions_triggered) as total_actions_triggered,
+                COUNT(CASE WHEN status = 'error' THEN 1 END) as error_count,
+                MAX(poll_time) as last_poll_time
+            FROM rss_poll_log 
+            WHERE poll_time >= datetime('now', '-24 hours')
+        ''').fetchone()
+        
+        # Execution summary (last 24 hours)
+        execution_summary = conn.execute('''
+            SELECT 
+                COUNT(*) as total_executions,
+                COUNT(CASE WHEN execution_type = 'rss_trigger' THEN 1 END) as rss_triggered,
+                COUNT(CASE WHEN execution_type = 'instant' THEN 1 END) as manual_executions,
+                COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed,
+                COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending
+            FROM execution_history 
+            WHERE created_at >= datetime('now', '-24 hours')
+        ''').fetchone()
+        
+        # Account summary
+        account_summary = conn.execute('''
+            SELECT 
+                COUNT(*) as total_accounts,
+                COUNT(CASE WHEN rss_status = 'active' THEN 1 END) as active_rss,
+                COUNT(CASE WHEN rss_status = 'failed' THEN 1 END) as failed_rss,
+                COUNT(CASE WHEN rss_status = 'pending' THEN 1 END) as pending_rss
+            FROM accounts
+        ''').fetchone()
+        
+        # Get RSS service status
+        rss_service_status = rss_poller.get_polling_status()
+        
+        conn.close()
+        
+        return jsonify({
+            'rss_polling': dict(rss_summary),
+            'executions': dict(execution_summary),
+            'accounts': dict(account_summary),
+            'rss_service': rss_service_status
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 def create_rss_feed_for_account(account_id: int, platform: str, username: str) -> dict:
     """Helper function to create RSS feed for a new account"""
     try:

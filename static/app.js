@@ -59,11 +59,20 @@ class SocialMediaManager {
         // Tab events
         document.getElementById('accountsTab').addEventListener('click', () => this.switchTab('accounts'));
         document.getElementById('historyTab').addEventListener('click', () => this.switchTab('history'));
+        document.getElementById('logsTab').addEventListener('click', () => this.switchTab('logs'));
         
         // History events
         document.getElementById('applyFilters').addEventListener('click', () => this.loadHistory());
         document.getElementById('historyPrevBtn').addEventListener('click', () => this.historyPrevPage());
         document.getElementById('historyNextBtn').addEventListener('click', () => this.historyNextPage());
+        
+        // Logs events
+        document.getElementById('startRSSBtn').addEventListener('click', () => this.startRSSPolling());
+        document.getElementById('stopRSSBtn').addEventListener('click', () => this.stopRSSPolling());
+        document.getElementById('pollNowBtn').addEventListener('click', () => this.pollRSSNow());
+        document.getElementById('rssLogsTab').addEventListener('click', () => this.switchLogsTab('rss'));
+        document.getElementById('executionLogsTab').addEventListener('click', () => this.switchLogsTab('execution'));
+        document.getElementById('accountLogsTab').addEventListener('click', () => this.switchLogsTab('account'));
         
         // Close modals when clicking outside
         document.getElementById('modal').addEventListener('click', (e) => {
@@ -1134,10 +1143,15 @@ class SocialMediaManager {
         document.getElementById('historyTab').className = tabName === 'history'
             ? 'px-4 py-2 text-sm font-medium text-blue-600 border-b-2 border-blue-600' 
             : 'px-4 py-2 text-sm font-medium text-gray-500 border-b-2 border-transparent hover:text-gray-700';
+            
+        document.getElementById('logsTab').className = tabName === 'logs'
+            ? 'px-4 py-2 text-sm font-medium text-blue-600 border-b-2 border-blue-600' 
+            : 'px-4 py-2 text-sm font-medium text-gray-500 border-b-2 border-transparent hover:text-gray-700';
         
         // Show/hide content
         document.getElementById('accountsContent').className = tabName === 'accounts' ? '' : 'hidden';
         document.getElementById('historyContent').className = tabName === 'history' ? '' : 'hidden';
+        document.getElementById('logsContent').className = tabName === 'logs' ? '' : 'hidden';
         
         // Update button visibility
         document.getElementById('addBtn').style.display = tabName === 'accounts' ? 'flex' : 'none';
@@ -1147,6 +1161,8 @@ class SocialMediaManager {
         if (tabName === 'history') {
             this.loadHistory();
             this.loadHistoryStats();
+        } else if (tabName === 'logs') {
+            this.loadLogs();
         }
     }
 
@@ -1465,6 +1481,277 @@ class SocialMediaManager {
         } catch (error) {
             console.error('Error creating RSS feed:', error);
             this.showNotification('An error occurred while creating RSS feed', 'error');
+        }
+    }
+
+    // Logging Management Methods
+    async loadLogs() {
+        await this.loadLogsSummary();
+        this.switchLogsTab('rss'); // Default to RSS logs
+    }
+
+    async loadLogsSummary() {
+        try {
+            const response = await fetch('/api/logs/summary');
+            const data = await response.json();
+            
+            if (response.ok) {
+                this.renderLogsSummary(data);
+                this.updateRSSServiceStatus(data.rss_service);
+            }
+        } catch (error) {
+            console.error('Error loading logs summary:', error);
+        }
+    }
+
+    renderLogsSummary(data) {
+        const summaryDiv = document.getElementById('logsSummary');
+        
+        summaryDiv.innerHTML = `
+            <div class="bg-white p-4 rounded-lg shadow border">
+                <h3 class="font-medium text-gray-700 mb-2">RSS Polling (24h)</h3>
+                <div class="text-2xl font-bold text-blue-600">${data.rss_polling.total_polls || 0}</div>
+                <div class="text-sm text-gray-500">${data.rss_polling.total_new_posts || 0} new posts detected</div>
+            </div>
+            <div class="bg-white p-4 rounded-lg shadow border">
+                <h3 class="font-medium text-gray-700 mb-2">Actions Triggered</h3>
+                <div class="text-2xl font-bold text-green-600">${data.rss_polling.total_actions_triggered || 0}</div>
+                <div class="text-sm text-gray-500">${data.rss_polling.error_count || 0} errors</div>
+            </div>
+            <div class="bg-white p-4 rounded-lg shadow border">
+                <h3 class="font-medium text-gray-700 mb-2">Executions (24h)</h3>
+                <div class="text-2xl font-bold text-purple-600">${data.executions.total_executions || 0}</div>
+                <div class="text-sm text-gray-500">${data.executions.rss_triggered || 0} RSS + ${data.executions.manual_executions || 0} manual</div>
+            </div>
+            <div class="bg-white p-4 rounded-lg shadow border">
+                <h3 class="font-medium text-gray-700 mb-2">Active Accounts</h3>
+                <div class="text-2xl font-bold text-indigo-600">${data.accounts.total_accounts || 0}</div>
+                <div class="text-sm text-gray-500">${data.accounts.active_rss || 0} with active RSS</div>
+            </div>
+        `;
+    }
+
+    updateRSSServiceStatus(rssService) {
+        const statusEl = document.getElementById('rssServiceStatus');
+        
+        if (rssService.is_running) {
+            statusEl.innerHTML = `
+                <span class="text-green-600">✅ Running</span> 
+                (${rssService.active_feeds_count || 0} feeds monitored, last poll: ${rssService.last_poll_time || 'Never'})
+            `;
+        } else {
+            statusEl.innerHTML = '<span class="text-red-600">❌ Stopped</span>';
+        }
+    }
+
+    switchLogsTab(tabType) {
+        // Update log tab buttons
+        ['rssLogsTab', 'executionLogsTab', 'accountLogsTab'].forEach(tabId => {
+            const tab = document.getElementById(tabId);
+            const isActive = (tabId === `${tabType}LogsTab`);
+            tab.className = isActive 
+                ? 'px-4 py-2 text-sm font-medium text-blue-600 border-b-2 border-blue-600'
+                : 'px-4 py-2 text-sm font-medium text-gray-500 border-b-2 border-transparent hover:text-gray-700';
+        });
+
+        // Show/hide content
+        document.getElementById('rssLogsContent').className = tabType === 'rss' ? '' : 'hidden';
+        document.getElementById('executionLogsContent').className = tabType === 'execution' ? '' : 'hidden';
+        document.getElementById('accountLogsContent').className = tabType === 'account' ? '' : 'hidden';
+
+        // Load appropriate data
+        if (tabType === 'rss') {
+            this.loadRSSLogs();
+        } else if (tabType === 'execution') {
+            this.loadExecutionLogs();
+        } else if (tabType === 'account') {
+            this.loadAccountLogs();
+        }
+    }
+
+    async loadRSSLogs() {
+        try {
+            const response = await fetch('/api/logs/rss-polling');
+            const data = await response.json();
+            
+            if (response.ok) {
+                this.renderRSSLogs(data.logs);
+            }
+        } catch (error) {
+            console.error('Error loading RSS logs:', error);
+        }
+    }
+
+    renderRSSLogs(logs) {
+        const tableBody = document.getElementById('rssLogsTable');
+        const emptyState = document.getElementById('emptyRSSLogs');
+        
+        if (logs.length === 0) {
+            tableBody.innerHTML = '';
+            emptyState.classList.remove('hidden');
+            return;
+        }
+        
+        emptyState.classList.add('hidden');
+        
+        tableBody.innerHTML = logs.map(log => `
+            <tr class="hover:bg-gray-50">
+                <td class="px-3 py-2 text-sm">${this.formatDateTime(log.poll_time)}</td>
+                <td class="px-3 py-2 text-sm">${log.feed_title || 'Unknown'}</td>
+                <td class="px-3 py-2 text-sm">
+                    ${log.account_platform ? `<i class="${this.getPlatformIcon(log.account_platform)}"></i> ${log.account_username}` : 'N/A'}
+                </td>
+                <td class="px-3 py-2 text-sm">${log.posts_found || 0}</td>
+                <td class="px-3 py-2 text-sm font-medium ${log.new_posts > 0 ? 'text-green-600' : ''}">${log.new_posts || 0}</td>
+                <td class="px-3 py-2 text-sm font-medium ${log.actions_triggered > 0 ? 'text-blue-600' : ''}">${log.actions_triggered || 0}</td>
+                <td class="px-3 py-2 text-sm">
+                    <span class="px-2 py-1 text-xs rounded ${log.status === 'success' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
+                        ${log.status}
+                    </span>
+                </td>
+            </tr>
+        `).join('');
+    }
+
+    async loadExecutionLogs() {
+        try {
+            const response = await fetch('/api/logs/execution-activity');
+            const data = await response.json();
+            
+            if (response.ok) {
+                this.renderExecutionLogs(data.logs);
+            }
+        } catch (error) {
+            console.error('Error loading execution logs:', error);
+        }
+    }
+
+    renderExecutionLogs(logs) {
+        const tableBody = document.getElementById('executionLogsTable');
+        
+        tableBody.innerHTML = logs.map(log => `
+            <tr class="hover:bg-gray-50">
+                <td class="px-3 py-2 text-sm">${this.formatDateTime(log.created_at)}</td>
+                <td class="px-3 py-2 text-sm">
+                    <span class="px-2 py-1 text-xs rounded ${log.execution_type === 'rss_trigger' ? 'bg-blue-100 text-blue-800' : 'bg-orange-100 text-orange-800'}">
+                        ${log.execution_type_display}
+                    </span>
+                </td>
+                <td class="px-3 py-2 text-sm">
+                    <i class="${this.getPlatformIcon(log.platform)}"></i> ${log.platform}
+                </td>
+                <td class="px-3 py-2 text-sm">${log.account_username || 'Manual'}</td>
+                <td class="px-3 py-2 text-sm text-gray-600" title="${log.service_name}">${log.service_name.substring(0, 30)}...</td>
+                <td class="px-3 py-2 text-sm">
+                    <span class="px-2 py-1 text-xs rounded ${this.getStatusBadgeClass(log.status)}">
+                        ${log.status}
+                    </span>
+                </td>
+                <td class="px-3 py-2 text-sm font-mono">${log.jap_order_id}</td>
+            </tr>
+        `).join('');
+    }
+
+    async loadAccountLogs() {
+        try {
+            const response = await fetch('/api/logs/account-activity');
+            const data = await response.json();
+            
+            if (response.ok) {
+                this.renderAccountLogs(data.logs);
+            }
+        } catch (error) {
+            console.error('Error loading account logs:', error);
+        }
+    }
+
+    renderAccountLogs(logs) {
+        const tableBody = document.getElementById('accountLogsTable');
+        
+        tableBody.innerHTML = logs.map(log => `
+            <tr class="hover:bg-gray-50">
+                <td class="px-3 py-2 text-sm">${this.formatDateTime(log.created_at)}</td>
+                <td class="px-3 py-2 text-sm">
+                    <i class="${this.getPlatformIcon(log.platform)}"></i> ${log.platform}
+                </td>
+                <td class="px-3 py-2 text-sm font-medium">${log.username}</td>
+                <td class="px-3 py-2 text-sm">
+                    <span class="px-2 py-1 text-xs rounded ${this.getRSSStatusBadgeClass(log.rss_status)}">
+                        ${log.rss_status}
+                    </span>
+                </td>
+                <td class="px-3 py-2 text-sm">${log.action_count}</td>
+                <td class="px-3 py-2 text-sm">${log.rss_last_check ? this.formatDateTime(log.rss_last_check) : 'Never'}</td>
+                <td class="px-3 py-2 text-sm">${log.rss_last_post ? this.formatDateTime(log.rss_last_post) : 'None'}</td>
+            </tr>
+        `).join('');
+    }
+
+    // RSS Service Control Methods
+    async startRSSPolling() {
+        try {
+            const response = await fetch('/api/rss/start', { method: 'POST' });
+            const data = await response.json();
+            
+            if (response.ok) {
+                this.showNotification('RSS polling service started', 'success');
+                this.loadLogsSummary(); // Refresh status
+            } else {
+                this.showNotification(`Failed to start RSS polling: ${data.error}`, 'error');
+            }
+        } catch (error) {
+            console.error('Error starting RSS polling:', error);
+            this.showNotification('Error starting RSS polling service', 'error');
+        }
+    }
+
+    async stopRSSPolling() {
+        try {
+            const response = await fetch('/api/rss/stop', { method: 'POST' });
+            const data = await response.json();
+            
+            if (response.ok) {
+                this.showNotification('RSS polling service stopped', 'success');
+                this.loadLogsSummary(); // Refresh status
+            } else {
+                this.showNotification(`Failed to stop RSS polling: ${data.error}`, 'error');
+            }
+        } catch (error) {
+            console.error('Error stopping RSS polling:', error);
+            this.showNotification('Error stopping RSS polling service', 'error');
+        }
+    }
+
+    async pollRSSNow() {
+        try {
+            const response = await fetch('/api/rss/poll-now', { method: 'POST' });
+            const data = await response.json();
+            
+            if (response.ok) {
+                this.showNotification(`Manual poll completed: ${data.summary}`, 'success');
+                this.loadRSSLogs(); // Refresh logs
+            } else {
+                this.showNotification(`Manual poll failed: ${data.error}`, 'error');
+            }
+        } catch (error) {
+            console.error('Error triggering manual poll:', error);
+            this.showNotification('Error triggering manual poll', 'error');
+        }
+    }
+
+    // Helper Methods
+    formatDateTime(dateString) {
+        if (!dateString) return 'N/A';
+        const date = new Date(dateString);
+        return date.toLocaleString();
+    }
+
+    getRSSStatusBadgeClass(status) {
+        switch (status) {
+            case 'active': return 'bg-green-100 text-green-800';
+            case 'failed': return 'bg-red-100 text-red-800';
+            case 'pending': return 'bg-yellow-100 text-yellow-800';
+            default: return 'bg-gray-100 text-gray-800';
         }
     }
 }
