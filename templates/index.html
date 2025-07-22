@@ -24,6 +24,9 @@
                         <button id="logsTab" class="px-4 py-2 text-sm font-medium text-gray-500 border-b-2 border-transparent hover:text-gray-700">
                             <i class="fas fa-file-alt mr-2"></i>Logs
                         </button>
+                        <button id="settingsTab" class="px-4 py-2 text-sm font-medium text-gray-500 border-b-2 border-transparent hover:text-gray-700">
+                            <i class="fas fa-cog mr-2"></i>Settings
+                        </button>
                     </div>
                 </div>
                 <div class="flex gap-3">
@@ -133,6 +136,7 @@
                                 <th class="px-3 py-2 text-left text-gray-600 font-medium">Service</th>
                                 <th class="px-3 py-2 text-left text-gray-600 font-medium">Target</th>
                                 <th class="px-3 py-2 text-left text-gray-600 font-medium">Quantity</th>
+                                <th class="px-3 py-2 text-left text-gray-600 font-medium">Cost</th>
                                 <th class="px-3 py-2 text-left text-gray-600 font-medium">Status</th>
                                 <th class="px-3 py-2 text-left text-gray-600 font-medium">Date</th>
                                 <th class="px-3 py-2 text-left text-gray-600 font-medium">Actions</th>
@@ -174,7 +178,7 @@
                     <div class="flex justify-between items-center">
                         <div>
                             <h3 class="font-semibold text-blue-800">RSS Polling Service</h3>
-                            <p id="rssServiceStatus" class="text-sm text-blue-600">Always running - polls every 60 seconds</p>
+                            <p id="rssServiceStatus" class="text-sm text-blue-600">Always running - polls every 15 minutes</p>
                             <p class="text-xs text-blue-500 mt-1">Only enabled accounts with RSS feeds and configured actions are monitored</p>
                         </div>
                         <div class="flex gap-2">
@@ -185,96 +189,155 @@
                     </div>
                 </div>
 
-                <!-- Summary Stats -->
-                <div id="logsSummary" class="mb-6 grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <!-- Stats will be loaded here -->
+                <!-- Console Filters -->
+                <div class="mb-4 p-3 bg-gray-800 rounded-t-lg">
+                    <div class="flex flex-wrap gap-3 items-center">
+                        <span class="text-green-400 font-mono text-sm">$ filters:</span>
+                        <div class="flex gap-2">
+                            <button id="filterAll" class="px-3 py-1 text-xs bg-green-600 text-white rounded font-mono hover:bg-green-700">ALL</button>
+                            <button id="filterRSS" class="px-3 py-1 text-xs bg-gray-700 text-green-400 rounded font-mono hover:bg-gray-600">RSS</button>
+                            <button id="filterExecution" class="px-3 py-1 text-xs bg-gray-700 text-green-400 rounded font-mono hover:bg-gray-600">EXEC</button>
+                            <button id="filterAccount" class="px-3 py-1 text-xs bg-gray-700 text-green-400 rounded font-mono hover:bg-gray-600">ACCT</button>
+                        </div>
+                        <div class="flex gap-2 ml-auto">
+                            <button id="clearConsole" class="px-3 py-1 text-xs bg-red-600 text-white rounded font-mono hover:bg-red-700">CLEAR</button>
+                            <button id="refreshConsole" class="px-3 py-1 text-xs bg-blue-600 text-white rounded font-mono hover:bg-blue-700">REFRESH</button>
+                        </div>
+                    </div>
                 </div>
 
-                <!-- Log Type Tabs -->
-                <div class="mb-6">
-                    <div class="flex gap-4 border-b">
-                        <button id="rssLogsTab" class="px-4 py-2 text-sm font-medium text-blue-600 border-b-2 border-blue-600">
-                            RSS Polling
+                <!-- Terminal Console -->
+                <div class="bg-black rounded-b-lg border-2 border-gray-800" style="height: 500px;">
+                    <div class="p-4 h-full overflow-y-auto">
+                        <div id="consoleOutput" class="font-mono text-sm space-y-1">
+                            <!-- Console output will be populated here -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Console Status -->
+                <div class="mt-2 p-2 bg-gray-100 rounded text-xs text-gray-600 font-mono text-center">
+                    <span id="consoleStatus">Ready - Showing all system logs</span>
+                </div>
+            </div>
+
+            <!-- Settings Tab Content -->
+            <div id="settingsContent" class="hidden">
+                <!-- API Configuration -->
+                <form id="settingsForm">
+                <div class="mb-8 p-6 bg-white rounded-lg border">
+                    <h3 class="text-lg font-semibold mb-4 text-gray-800">
+                        <i class="fas fa-key text-blue-500 mr-2"></i>API Configuration
+                    </h3>
+                    
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <!-- JAP API Settings -->
+                        <div class="space-y-4">
+                            <h4 class="font-medium text-gray-700">JAP (Social Media Services)</h4>
+                            <div>
+                                <label for="japApiKey" class="block text-sm font-medium text-gray-600 mb-1">API Key</label>
+                                <div class="relative">
+                                    <input type="password" id="japApiKey" 
+                                           class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                           placeholder="Enter JAP API Key">
+                                    <button type="button" id="toggleJapKey" class="absolute right-2 top-2 text-gray-500 hover:text-gray-700">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- RSS.app API Settings -->
+                        <div class="space-y-4">
+                            <h4 class="font-medium text-gray-700">RSS.app (Feed Monitoring)</h4>
+                            <div>
+                                <label for="rssApiKey" class="block text-sm font-medium text-gray-600 mb-1">API Key</label>
+                                <div class="relative">
+                                    <input type="password" id="rssApiKey" 
+                                           class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                           placeholder="Enter RSS API Key">
+                                    <button type="button" id="toggleRssKey" class="absolute right-2 top-2 text-gray-500 hover:text-gray-700">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div>
+                                <label for="rssApiSecret" class="block text-sm font-medium text-gray-600 mb-1">API Secret</label>
+                                <div class="relative">
+                                    <input type="password" id="rssApiSecret" 
+                                           class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                           placeholder="Enter RSS API Secret">
+                                    <button type="button" id="toggleRssSecret" class="absolute right-2 top-2 text-gray-500 hover:text-gray-700">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- System Configuration -->
+                <div class="mb-8 p-6 bg-white rounded-lg border">
+                    <h3 class="text-lg font-semibold mb-4 text-gray-800">
+                        <i class="fas fa-cogs text-green-500 mr-2"></i>System Configuration
+                    </h3>
+                    
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <!-- Polling Settings -->
+                        <div class="space-y-4">
+                            <h4 class="font-medium text-gray-700">RSS Polling</h4>
+                            <div>
+                                <label for="pollingInterval" class="block text-sm font-medium text-gray-600 mb-1">Polling Interval (minutes)</label>
+                                <select id="pollingInterval" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                    <option value="5">5 minutes</option>
+                                    <option value="10">10 minutes</option>
+                                    <option value="15" selected>15 minutes (recommended)</option>
+                                    <option value="30">30 minutes</option>
+                                    <option value="60">1 hour</option>
+                                </select>
+                                <p class="text-xs text-gray-500 mt-1">RSS.app refreshes every 15 minutes, so shorter intervals may not find new posts</p>
+                            </div>
+                        </div>
+
+                        <!-- Time Zone Settings -->
+                        <div class="space-y-4">
+                            <h4 class="font-medium text-gray-700">Time Zone</h4>
+                            <div>
+                                <label for="timeZone" class="block text-sm font-medium text-gray-600 mb-1">System Time Zone</label>
+                                <select id="timeZone" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                    <option value="UTC">UTC (Default)</option>
+                                    <option value="America/New_York">Eastern Time (US)</option>
+                                    <option value="America/Chicago">Central Time (US)</option>
+                                    <option value="America/Denver">Mountain Time (US)</option>
+                                    <option value="America/Los_Angeles">Pacific Time (US)</option>
+                                    <option value="Europe/London">London</option>
+                                    <option value="Europe/Paris">Paris/Berlin</option>
+                                    <option value="Asia/Jerusalem">Israel</option>
+                                    <option value="Asia/Tokyo">Tokyo</option>
+                                    <option value="Australia/Sydney">Sydney</option>
+                                </select>
+                                <p class="text-xs text-gray-500 mt-1">Affects log timestamps and scheduling</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Save Settings -->
+                <div class="flex justify-between items-center">
+                    <div class="text-sm text-gray-600">
+                        <i class="fas fa-info-circle mr-1"></i>
+                        Changes require application restart to take full effect
+                    </div>
+                    <div class="flex gap-3">
+                        <button type="button" id="testApiKeys" class="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded-lg transition-colors">
+                            <i class="fas fa-vial mr-2"></i>Test APIs
                         </button>
-                        <button id="executionLogsTab" class="px-4 py-2 text-sm font-medium text-gray-500 border-b-2 border-transparent hover:text-gray-700">
-                            Executions
-                        </button>
-                        <button id="accountLogsTab" class="px-4 py-2 text-sm font-medium text-gray-500 border-b-2 border-transparent hover:text-gray-700">
-                            Accounts
+                        <button type="button" id="saveSettings" class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg transition-colors">
+                            <i class="fas fa-save mr-2"></i>Save Settings
                         </button>
                     </div>
                 </div>
-
-                <!-- RSS Polling Logs -->
-                <div id="rssLogsContent">
-                    <div class="overflow-x-auto">
-                        <table class="w-full table-auto text-sm">
-                            <thead>
-                                <tr class="bg-gray-100">
-                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Time</th>
-                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Feed</th>
-                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Account</th>
-                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Posts Found</th>
-                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">New Posts</th>
-                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Actions</th>
-                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Status</th>
-                                </tr>
-                            </thead>
-                            <tbody id="rssLogsTable" class="divide-y divide-gray-200">
-                                <!-- RSS logs will be loaded here -->
-                            </tbody>
-                        </table>
-                    </div>
-                    <div id="emptyRSSLogs" class="hidden text-center py-12">
-                        <i class="fas fa-rss text-gray-400 text-6xl mb-4"></i>
-                        <h3 class="text-xl text-gray-600 mb-2">No RSS polling logs</h3>
-                        <p class="text-gray-500 mb-4">RSS polling will appear here once started</p>
-                    </div>
-                </div>
-
-                <!-- Execution Logs -->
-                <div id="executionLogsContent" class="hidden">
-                    <div class="overflow-x-auto">
-                        <table class="w-full table-auto text-sm">
-                            <thead>
-                                <tr class="bg-gray-100">
-                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Time</th>
-                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Type</th>
-                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Platform</th>
-                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Account</th>
-                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Service</th>
-                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Status</th>
-                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Order ID</th>
-                                </tr>
-                            </thead>
-                            <tbody id="executionLogsTable" class="divide-y divide-gray-200">
-                                <!-- Execution logs will be loaded here -->
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <!-- Account Logs -->
-                <div id="accountLogsContent" class="hidden">
-                    <div class="overflow-x-auto">
-                        <table class="w-full table-auto text-sm">
-                            <thead>
-                                <tr class="bg-gray-100">
-                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Created</th>
-                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Platform</th>
-                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Username</th>
-                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">RSS Status</th>
-                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Actions</th>
-                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Last Check</th>
-                                    <th class="px-3 py-2 text-left text-gray-600 font-medium">Last Post</th>
-                                </tr>
-                            </thead>
-                            <tbody id="accountLogsTable" class="divide-y divide-gray-200">
-                                <!-- Account logs will be loaded here -->
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
+                </form>
             </div>
         </div>
     </div>

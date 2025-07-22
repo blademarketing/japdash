@@ -60,17 +60,28 @@ class SocialMediaManager {
         document.getElementById('accountsTab').addEventListener('click', () => this.switchTab('accounts'));
         document.getElementById('historyTab').addEventListener('click', () => this.switchTab('history'));
         document.getElementById('logsTab').addEventListener('click', () => this.switchTab('logs'));
+        document.getElementById('settingsTab').addEventListener('click', () => this.switchTab('settings'));
         
         // History events
         document.getElementById('applyFilters').addEventListener('click', () => this.loadHistory());
         document.getElementById('historyPrevBtn').addEventListener('click', () => this.historyPrevPage());
         document.getElementById('historyNextBtn').addEventListener('click', () => this.historyNextPage());
         
-        // Logs events
+        // Console logs events
         document.getElementById('pollNowBtn').addEventListener('click', () => this.pollRSSNow());
-        document.getElementById('rssLogsTab').addEventListener('click', () => this.switchLogsTab('rss'));
-        document.getElementById('executionLogsTab').addEventListener('click', () => this.switchLogsTab('execution'));
-        document.getElementById('accountLogsTab').addEventListener('click', () => this.switchLogsTab('account'));
+        document.getElementById('filterAll').addEventListener('click', () => this.setConsoleFilter('all'));
+        document.getElementById('filterRSS').addEventListener('click', () => this.setConsoleFilter('rss'));
+        document.getElementById('filterExecution').addEventListener('click', () => this.setConsoleFilter('execution'));
+        document.getElementById('filterAccount').addEventListener('click', () => this.setConsoleFilter('account'));
+        document.getElementById('clearConsole').addEventListener('click', () => this.clearConsole());
+        document.getElementById('refreshConsole').addEventListener('click', () => this.refreshConsole());
+        
+        // Settings events
+        document.getElementById('toggleJapKey').addEventListener('click', () => this.togglePasswordVisibility('japApiKey', 'toggleJapKey'));
+        document.getElementById('toggleRssKey').addEventListener('click', () => this.togglePasswordVisibility('rssApiKey', 'toggleRssKey'));
+        document.getElementById('toggleRssSecret').addEventListener('click', () => this.togglePasswordVisibility('rssApiSecret', 'toggleRssSecret'));
+        document.getElementById('testApiKeys').addEventListener('click', () => this.testApiKeys());
+        document.getElementById('saveSettings').addEventListener('click', () => this.saveSettings());
         
         // Close modals when clicking outside
         document.getElementById('modal').addEventListener('click', (e) => {
@@ -1202,10 +1213,15 @@ class SocialMediaManager {
             ? 'px-4 py-2 text-sm font-medium text-blue-600 border-b-2 border-blue-600' 
             : 'px-4 py-2 text-sm font-medium text-gray-500 border-b-2 border-transparent hover:text-gray-700';
         
+        document.getElementById('settingsTab').className = tabName === 'settings'
+            ? 'px-4 py-2 text-sm font-medium text-blue-600 border-b-2 border-blue-600' 
+            : 'px-4 py-2 text-sm font-medium text-gray-500 border-b-2 border-transparent hover:text-gray-700';
+        
         // Show/hide content
         document.getElementById('accountsContent').className = tabName === 'accounts' ? '' : 'hidden';
         document.getElementById('historyContent').className = tabName === 'history' ? '' : 'hidden';
         document.getElementById('logsContent').className = tabName === 'logs' ? '' : 'hidden';
+        document.getElementById('settingsContent').className = tabName === 'settings' ? '' : 'hidden';
         
         // Update button visibility
         document.getElementById('addBtn').style.display = tabName === 'accounts' ? 'flex' : 'none';
@@ -1217,6 +1233,8 @@ class SocialMediaManager {
             this.loadHistoryStats();
         } else if (tabName === 'logs') {
             this.loadLogs();
+        } else if (tabName === 'settings') {
+            this.loadSettings();
         }
     }
 
@@ -1294,7 +1312,10 @@ class SocialMediaManager {
                 </td>
                 <td class="px-3 py-2 text-sm">${execution.account_username || '-'}</td>
                 <td class="px-3 py-2 text-sm" title="${execution.service_name}">
-                    ${execution.service_name.length > 25 ? execution.service_name.substring(0, 25) + '...' : execution.service_name}
+                    <div class="flex flex-col">
+                        <span class="font-medium">${execution.service_name.length > 25 ? execution.service_name.substring(0, 25) + '...' : execution.service_name}</span>
+                        <span class="text-xs text-gray-500 font-mono">ID: ${execution.service_id}</span>
+                    </div>
                 </td>
                 <td class="px-3 py-2 text-sm">
                     <a href="${execution.target_url}" target="_blank" class="text-blue-500 hover:text-blue-700" title="${execution.target_url}">
@@ -1302,6 +1323,9 @@ class SocialMediaManager {
                     </a>
                 </td>
                 <td class="px-3 py-2 text-sm">${execution.quantity.toLocaleString()}</td>
+                <td class="px-3 py-2 text-sm font-medium">
+                    ${this.formatCost(execution.cost)}
+                </td>
                 <td class="px-3 py-2">
                     <span class="inline-flex items-center px-2 py-1 text-xs rounded-full ${this.getStatusColor(execution.status)}">
                         ${this.formatStatus(execution.status)}
@@ -1333,6 +1357,21 @@ class SocialMediaManager {
         return status.split('_').map(word => 
             word.charAt(0).toUpperCase() + word.slice(1)
         ).join(' ');
+    }
+
+    formatCost(cost) {
+        if (!cost || cost === 0) {
+            return '<span class="text-gray-400">$0.00</span>';
+        }
+        
+        const numericCost = parseFloat(cost);
+        if (isNaN(numericCost)) {
+            return '<span class="text-gray-400">N/A</span>';
+        }
+        
+        const formatted = numericCost.toFixed(2);
+        const colorClass = numericCost > 0 ? 'text-green-600' : 'text-gray-400';
+        return `<span class="${colorClass}">$${formatted}</span>`;
     }
 
     formatDate(dateString) {
@@ -1538,211 +1577,393 @@ class SocialMediaManager {
         }
     }
 
-    // Logging Management Methods
+    // Console Logging Management Methods
     async loadLogs() {
-        await this.loadLogsSummary();
-        this.switchLogsTab('rss'); // Default to RSS logs
+        this.currentLogFilter = 'all';
+        await this.updateRSSServiceStatus();
+        await this.loadConsoleLogs();
     }
 
-    async loadLogsSummary() {
+    async updateRSSServiceStatus() {
         try {
             const response = await fetch('/api/logs/summary');
             const data = await response.json();
             
             if (response.ok) {
-                this.renderLogsSummary(data);
-                this.updateRSSServiceStatus(data.rss_service);
+                const rssService = data.rss_service;
+                const statusEl = document.getElementById('rssServiceStatus');
+                
+                if (rssService.is_running) {
+                    const feedCount = rssService.active_feeds || 0;
+                    const lastPoll = rssService.last_poll || 'Never';
+                    
+                    statusEl.innerHTML = `
+                        <span class="text-green-600">✅ Active</span> - 
+                        ${feedCount} accounts monitored
+                        <br><span class="text-xs text-blue-500">Last poll: ${lastPoll === 'Never' ? 'Never' : new Date(lastPoll).toLocaleString()}</span>
+                    `;
+                } else {
+                    statusEl.innerHTML = '<span class="text-red-600">❌ Service not running</span>';
+                }
             }
         } catch (error) {
-            console.error('Error loading logs summary:', error);
+            console.error('Error loading RSS service status:', error);
         }
     }
 
-    renderLogsSummary(data) {
-        const summaryDiv = document.getElementById('logsSummary');
+    setConsoleFilter(filterType) {
+        this.currentLogFilter = filterType;
         
-        summaryDiv.innerHTML = `
-            <div class="bg-white p-4 rounded-lg shadow border">
-                <h3 class="font-medium text-gray-700 mb-2">RSS Polling (24h)</h3>
-                <div class="text-2xl font-bold text-blue-600">${data.rss_polling.total_polls || 0}</div>
-                <div class="text-sm text-gray-500">${data.rss_polling.total_new_posts || 0} new posts detected</div>
-            </div>
-            <div class="bg-white p-4 rounded-lg shadow border">
-                <h3 class="font-medium text-gray-700 mb-2">Actions Triggered</h3>
-                <div class="text-2xl font-bold text-green-600">${data.rss_polling.total_actions_triggered || 0}</div>
-                <div class="text-sm text-gray-500">${data.rss_polling.error_count || 0} errors</div>
-            </div>
-            <div class="bg-white p-4 rounded-lg shadow border">
-                <h3 class="font-medium text-gray-700 mb-2">Executions (24h)</h3>
-                <div class="text-2xl font-bold text-purple-600">${data.executions.total_executions || 0}</div>
-                <div class="text-sm text-gray-500">${data.executions.rss_triggered || 0} RSS + ${data.executions.manual_executions || 0} manual</div>
-            </div>
-            <div class="bg-white p-4 rounded-lg shadow border">
-                <h3 class="font-medium text-gray-700 mb-2">Active Accounts</h3>
-                <div class="text-2xl font-bold text-indigo-600">${data.accounts.total_accounts || 0}</div>
-                <div class="text-sm text-gray-500">${data.accounts.active_rss || 0} with active RSS</div>
-            </div>
-        `;
-    }
-
-    updateRSSServiceStatus(rssService) {
-        const statusEl = document.getElementById('rssServiceStatus');
-        
-        if (rssService.is_running) {
-            const feedCount = rssService.active_feeds || rssService.active_feeds_count || 0;
-            const lastPoll = rssService.last_poll || rssService.last_poll_time || 'Never';
+        // Update filter button styles
+        ['filterAll', 'filterRSS', 'filterExecution', 'filterAccount'].forEach(btnId => {
+            const btn = document.getElementById(btnId);
+            const isActive = (
+                (btnId === 'filterAll' && filterType === 'all') ||
+                (btnId === 'filterRSS' && filterType === 'rss') ||
+                (btnId === 'filterExecution' && filterType === 'execution') ||
+                (btnId === 'filterAccount' && filterType === 'account')
+            );
             
-            statusEl.innerHTML = `
-                <span class="text-green-600">✅ Active</span> - 
-                ${feedCount} accounts being monitored
-                <br><span class="text-xs text-blue-500">Last poll: ${lastPoll === 'Never' ? 'Never' : new Date(lastPoll).toLocaleString()}</span>
-            `;
-        } else {
-            statusEl.innerHTML = '<span class="text-red-600">❌ Service not running</span>';
-        }
-    }
-
-    switchLogsTab(tabType) {
-        // Update log tab buttons
-        ['rssLogsTab', 'executionLogsTab', 'accountLogsTab'].forEach(tabId => {
-            const tab = document.getElementById(tabId);
-            const isActive = (tabId === `${tabType}LogsTab`);
-            tab.className = isActive 
-                ? 'px-4 py-2 text-sm font-medium text-blue-600 border-b-2 border-blue-600'
-                : 'px-4 py-2 text-sm font-medium text-gray-500 border-b-2 border-transparent hover:text-gray-700';
+            btn.className = isActive 
+                ? 'px-3 py-1 text-xs bg-green-600 text-white rounded font-mono hover:bg-green-700'
+                : 'px-3 py-1 text-xs bg-gray-700 text-green-400 rounded font-mono hover:bg-gray-600';
         });
 
-        // Show/hide content
-        document.getElementById('rssLogsContent').className = tabType === 'rss' ? '' : 'hidden';
-        document.getElementById('executionLogsContent').className = tabType === 'execution' ? '' : 'hidden';
-        document.getElementById('accountLogsContent').className = tabType === 'account' ? '' : 'hidden';
+        // Update status
+        const statusEl = document.getElementById('consoleStatus');
+        const filterNames = {
+            all: 'all system logs',
+            rss: 'RSS polling logs',
+            execution: 'execution logs', 
+            account: 'account activity logs'
+        };
+        statusEl.textContent = `Ready - Showing ${filterNames[filterType]}`;
 
-        // Load appropriate data
-        if (tabType === 'rss') {
-            this.loadRSSLogs();
-        } else if (tabType === 'execution') {
-            this.loadExecutionLogs();
-        } else if (tabType === 'account') {
-            this.loadAccountLogs();
-        }
+        this.loadConsoleLogs();
     }
 
-    async loadRSSLogs() {
+    async loadConsoleLogs() {
         try {
-            const response = await fetch('/api/logs/rss-polling');
+            const response = await fetch(`/api/logs/console?type=${this.currentLogFilter || 'all'}&limit=100`);
             const data = await response.json();
             
             if (response.ok) {
-                this.renderRSSLogs(data.logs);
+                this.renderConsoleLogs(data.logs);
             }
         } catch (error) {
-            console.error('Error loading RSS logs:', error);
+            console.error('Error loading console logs:', error);
         }
     }
 
-    renderRSSLogs(logs) {
-        const tableBody = document.getElementById('rssLogsTable');
-        const emptyState = document.getElementById('emptyRSSLogs');
+    renderConsoleLogs(logs) {
+        const consoleOutput = document.getElementById('consoleOutput');
         
         if (logs.length === 0) {
-            tableBody.innerHTML = '';
-            emptyState.classList.remove('hidden');
+            consoleOutput.innerHTML = `
+                <div class="text-gray-500">
+                    <span class="text-green-400">[SYS]</span> No logs found for current filter
+                </div>
+            `;
+            return;
+        }
+
+        consoleOutput.innerHTML = logs.map(log => {
+            const timestamp = this.formatTimestamp(log.timestamp);
+            const colors = this.getLogColors(log.type, log.status);
+            
+            return `
+                <div class="hover:bg-gray-900 px-2 py-1 rounded">
+                    <span class="text-gray-400">${timestamp}</span> 
+                    <span class="${colors.type}">[${log.type}]</span> 
+                    <span class="${colors.message}">${log.message}</span>
+                </div>
+            `;
+        }).join('');
+
+        // Auto-scroll to top (newest entries)
+        const consoleDiv = consoleOutput.parentElement;
+        consoleDiv.scrollTop = 0;
+    }
+
+    getLogColors(logType, status) {
+        const typeColors = {
+            'RSS': 'text-cyan-400',
+            'EXEC': 'text-yellow-400', 
+            'ACCT': 'text-purple-400'
+        };
+
+        const statusColors = {
+            'success': 'text-green-400',
+            'error': 'text-red-400',
+            'no_new_posts': 'text-gray-400',
+            'pending': 'text-yellow-400',
+            'completed': 'text-green-400',
+            'active': 'text-green-400'
+        };
+
+        return {
+            type: typeColors[logType] || 'text-white',
+            message: statusColors[status] || 'text-white'
+        };
+    }
+
+    formatTimestamp(dateString) {
+        if (!dateString) return 'N/A';
+        
+        try {
+            // Handle log format: "2025-01-22 09:27:39,765"  
+            // Convert to ISO format by replacing comma with dot and adding Z
+            let isoDate = dateString;
+            if (dateString.includes(',')) {
+                isoDate = dateString.replace(',', '.') + 'Z';
+            }
+            
+            const date = new Date(isoDate);
+            if (isNaN(date.getTime())) {
+                return dateString; // Return original if can't parse
+            }
+            
+            const now = new Date();
+            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            const logDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+            
+            // Check if log is from today
+            if (logDate.getTime() === today.getTime()) {
+                // Today: show only time
+                return date.toLocaleTimeString('en-US', { 
+                    hour12: false, 
+                    hour: '2-digit', 
+                    minute: '2-digit',
+                    second: '2-digit'
+                });
+            } else {
+                // Other days: show date + time  
+                return date.toLocaleString('en-US', {
+                    month: '2-digit',
+                    day: '2-digit', 
+                    hour12: false,
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                });
+            }
+        } catch (error) {
+            return dateString; // Return original on any error
+        }
+    }
+
+    async clearConsole() {
+        try {
+            const response = await fetch('/api/logs/console/clear', { method: 'POST' });
+            const data = await response.json();
+            
+            if (response.ok) {
+                document.getElementById('consoleOutput').innerHTML = `
+                    <div class="text-gray-500">
+                        <span class="text-green-400">[SYS]</span> Console logs cleared
+                    </div>
+                `;
+                document.getElementById('consoleStatus').textContent = 'Console logs cleared - ready for new activity';
+                this.showNotification('Console logs cleared successfully', 'success');
+            } else {
+                this.showNotification(`Error clearing logs: ${data.error}`, 'error');
+            }
+        } catch (error) {
+            console.error('Error clearing console logs:', error);
+            this.showNotification('Error clearing console logs', 'error');
+        }
+    }
+
+    async refreshConsole() {
+        document.getElementById('consoleStatus').textContent = 'Refreshing console logs...';
+        await this.loadConsoleLogs();
+        document.getElementById('consoleStatus').textContent = 'Ready - Console refreshed';
+    }
+
+    // Settings Management Methods
+    async loadSettings() {
+        try {
+            const response = await fetch('/api/settings');
+            const settings = await response.json();
+            
+            if (response.ok) {
+                // Store full keys for eye toggle functionality
+                this.fullApiKeys = {
+                    jap: settings.jap_api_key_full || '',
+                    rss_key: settings.rss_api_key_full || '',
+                    rss_secret: settings.rss_api_secret_full || ''
+                };
+                
+                // Populate form with masked values
+                document.getElementById('japApiKey').value = settings.jap_api_key || '';
+                document.getElementById('rssApiKey').value = settings.rss_api_key || '';
+                document.getElementById('rssApiSecret').value = settings.rss_api_secret || '';
+                document.getElementById('pollingInterval').value = settings.polling_interval || 15;
+                document.getElementById('timeZone').value = settings.time_zone || 'UTC';
+                
+                // Reset input types to password
+                document.getElementById('japApiKey').type = 'password';
+                document.getElementById('rssApiKey').type = 'password';
+                document.getElementById('rssApiSecret').type = 'password';
+                
+                // Reset eye icons
+                document.querySelector('#toggleJapKey i').className = 'fas fa-eye';
+                document.querySelector('#toggleRssKey i').className = 'fas fa-eye';
+                document.querySelector('#toggleRssSecret i').className = 'fas fa-eye';
+                
+                // Store current settings
+                this.currentSettings = settings;
+            }
+        } catch (error) {
+            console.error('Error loading settings:', error);
+            this.showNotification('Error loading settings', 'error');
+        }
+    }
+
+    togglePasswordVisibility(inputId, buttonId) {
+        const input = document.getElementById(inputId);
+        const button = document.getElementById(buttonId);
+        const icon = button.querySelector('i');
+        
+        if (!this.fullApiKeys) {
+            this.showNotification('No API keys loaded to show', 'error');
             return;
         }
         
-        emptyState.classList.add('hidden');
-        
-        tableBody.innerHTML = logs.map(log => `
-            <tr class="hover:bg-gray-50">
-                <td class="px-3 py-2 text-sm">${this.formatDateTime(log.poll_time)}</td>
-                <td class="px-3 py-2 text-sm">${log.feed_title || 'Unknown'}</td>
-                <td class="px-3 py-2 text-sm">
-                    ${log.account_platform ? `<i class="${this.getPlatformIcon(log.account_platform)}"></i> ${log.account_username}` : 'N/A'}
-                </td>
-                <td class="px-3 py-2 text-sm">${log.posts_found || 0}</td>
-                <td class="px-3 py-2 text-sm font-medium ${log.new_posts > 0 ? 'text-green-600' : ''}">${log.new_posts || 0}</td>
-                <td class="px-3 py-2 text-sm font-medium ${log.actions_triggered > 0 ? 'text-blue-600' : ''}">${log.actions_triggered || 0}</td>
-                <td class="px-3 py-2 text-sm">
-                    <span class="px-2 py-1 text-xs rounded ${log.status === 'success' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
-                        ${log.status}
-                    </span>
-                </td>
-            </tr>
-        `).join('');
-    }
-
-    async loadExecutionLogs() {
-        try {
-            const response = await fetch('/api/logs/execution-activity');
-            const data = await response.json();
+        if (input.type === 'password') {
+            // Show full key
+            const keyMap = {
+                'japApiKey': 'jap',
+                'rssApiKey': 'rss_key', 
+                'rssApiSecret': 'rss_secret'
+            };
             
-            if (response.ok) {
-                this.renderExecutionLogs(data.logs);
+            const keyName = keyMap[inputId];
+            if (keyName && this.fullApiKeys[keyName]) {
+                input.value = this.fullApiKeys[keyName];
+                input.type = 'text';
+                icon.className = 'fas fa-eye-slash';
+            } else {
+                this.showNotification('No key available to show', 'error');
             }
-        } catch (error) {
-            console.error('Error loading execution logs:', error);
+        } else {
+            // Hide key (show masked version)
+            input.type = 'password';
+            icon.className = 'fas fa-eye';
+            
+            // Restore masked version
+            const settings = this.currentSettings;
+            if (inputId === 'japApiKey') {
+                input.value = settings.jap_api_key || '';
+            } else if (inputId === 'rssApiKey') {
+                input.value = settings.rss_api_key || '';
+            } else if (inputId === 'rssApiSecret') {
+                input.value = settings.rss_api_secret || '';
+            }
         }
     }
 
-    renderExecutionLogs(logs) {
-        const tableBody = document.getElementById('executionLogsTable');
+    async testApiKeys() {
+        let japKey = document.getElementById('japApiKey').value;
+        let rssKey = document.getElementById('rssApiKey').value;
+        let rssSecret = document.getElementById('rssApiSecret').value;
         
-        tableBody.innerHTML = logs.map(log => `
-            <tr class="hover:bg-gray-50">
-                <td class="px-3 py-2 text-sm">${this.formatDateTime(log.created_at)}</td>
-                <td class="px-3 py-2 text-sm">
-                    <span class="px-2 py-1 text-xs rounded ${log.execution_type === 'rss_trigger' ? 'bg-blue-100 text-blue-800' : 'bg-orange-100 text-orange-800'}">
-                        ${log.execution_type_display}
-                    </span>
-                </td>
-                <td class="px-3 py-2 text-sm">
-                    <i class="${this.getPlatformIcon(log.platform)}"></i> ${log.platform}
-                </td>
-                <td class="px-3 py-2 text-sm">${log.account_username || 'Manual'}</td>
-                <td class="px-3 py-2 text-sm text-gray-600" title="${log.service_name}">${log.service_name.substring(0, 30)}...</td>
-                <td class="px-3 py-2 text-sm">
-                    <span class="px-2 py-1 text-xs rounded ${this.getStatusBadgeClass(log.status)}">
-                        ${log.status}
-                    </span>
-                </td>
-                <td class="px-3 py-2 text-sm font-mono">${log.jap_order_id}</td>
-            </tr>
-        `).join('');
-    }
-
-    async loadAccountLogs() {
+        // Use full keys if fields show masked values
+        if (japKey.includes('•') && this.fullApiKeys) {
+            japKey = this.fullApiKeys.jap;
+        }
+        if (rssKey.includes('•') && this.fullApiKeys) {
+            rssKey = this.fullApiKeys.rss_key;
+        }
+        if (rssSecret.includes('•') && this.fullApiKeys) {
+            rssSecret = this.fullApiKeys.rss_secret;
+        }
+        
+        if (!japKey || !rssKey || !rssSecret) {
+            this.showNotification('Please fill in all API keys', 'error');
+            return;
+        }
+        
         try {
-            const response = await fetch('/api/logs/account-activity');
-            const data = await response.json();
+            const response = await fetch('/api/settings/test-apis', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    jap_api_key: japKey,
+                    rss_api_key: rssKey,
+                    rss_api_secret: rssSecret
+                })
+            });
             
-            if (response.ok) {
-                this.renderAccountLogs(data.logs);
+            const result = await response.json();
+            
+            if (response.ok && result.success) {
+                this.showNotification('✅ All API keys are valid!', 'success');
+            } else {
+                this.showNotification(`❌ API test failed: ${result.error}`, 'error');
             }
         } catch (error) {
-            console.error('Error loading account logs:', error);
+            this.showNotification('Error testing API keys', 'error');
         }
     }
 
-    renderAccountLogs(logs) {
-        const tableBody = document.getElementById('accountLogsTable');
+    async saveSettings() {
+        let japKey = document.getElementById('japApiKey').value;
+        let rssKey = document.getElementById('rssApiKey').value;
+        let rssSecret = document.getElementById('rssApiSecret').value;
+        const pollingInterval = parseInt(document.getElementById('pollingInterval').value);
+        const timeZone = document.getElementById('timeZone').value;
         
-        tableBody.innerHTML = logs.map(log => `
-            <tr class="hover:bg-gray-50">
-                <td class="px-3 py-2 text-sm">${this.formatDateTime(log.created_at)}</td>
-                <td class="px-3 py-2 text-sm">
-                    <i class="${this.getPlatformIcon(log.platform)}"></i> ${log.platform}
-                </td>
-                <td class="px-3 py-2 text-sm font-medium">${log.username}</td>
-                <td class="px-3 py-2 text-sm">
-                    <span class="px-2 py-1 text-xs rounded ${this.getRSSStatusBadgeClass(log.rss_status)}">
-                        ${log.rss_status}
-                    </span>
-                </td>
-                <td class="px-3 py-2 text-sm">${log.action_count}</td>
-                <td class="px-3 py-2 text-sm">${log.rss_last_check ? this.formatDateTime(log.rss_last_check) : 'Never'}</td>
-                <td class="px-3 py-2 text-sm">${log.rss_last_post ? this.formatDateTime(log.rss_last_post) : 'None'}</td>
-            </tr>
-        `).join('');
+        const settings = {
+            polling_interval: pollingInterval,
+            time_zone: timeZone
+        };
+        
+        // Handle API keys - use full keys if showing masked values, or user input if changed
+        if (japKey) {
+            if (japKey.includes('•') && this.fullApiKeys) {
+                // User hasn't changed it, use existing full key
+                settings.jap_api_key = this.fullApiKeys.jap;
+            } else {
+                // User entered new key
+                settings.jap_api_key = japKey;
+            }
+        }
+        
+        if (rssKey) {
+            if (rssKey.includes('•') && this.fullApiKeys) {
+                settings.rss_api_key = this.fullApiKeys.rss_key;
+            } else {
+                settings.rss_api_key = rssKey;
+            }
+        }
+        
+        if (rssSecret) {
+            if (rssSecret.includes('•') && this.fullApiKeys) {
+                settings.rss_api_secret = this.fullApiKeys.rss_secret;
+            } else {
+                settings.rss_api_secret = rssSecret;
+            }
+        }
+        
+        try {
+            const response = await fetch('/api/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(settings)
+            });
+            
+            const result = await response.json();
+            
+            if (response.ok) {
+                this.showNotification('Settings saved successfully! Restart may be required for some changes.', 'success');
+                this.loadSettings(); // Reload to show updated masked values
+            } else {
+                this.showNotification(`Error saving settings: ${result.error}`, 'error');
+            }
+        } catch (error) {
+            this.showNotification('Error saving settings', 'error');
+        }
     }
 
     // RSS Service Control Methods
@@ -1767,7 +1988,8 @@ class SocialMediaManager {
                 } else {
                     this.showNotification(`Manual poll completed: ${summary}`, 'success');
                 }
-                this.loadRSSLogs(); // Refresh logs
+                this.loadConsoleLogs(); // Refresh console logs
+                this.updateRSSServiceStatus(); // Update last poll time
             } else {
                 this.showNotification(`Manual poll failed: ${data.error}`, 'error');
             }

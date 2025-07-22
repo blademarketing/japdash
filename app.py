@@ -5,6 +5,8 @@ import os
 import json
 from datetime import datetime
 from dotenv import load_dotenv
+import logging
+from logging.handlers import RotatingFileHandler
 from jap_client import JAPClient
 from rss_client import RSSAppClient
 from rss_poller import RSSPoller
@@ -14,6 +16,30 @@ load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
+
+# Setup console logger for log file
+def setup_console_logger():
+    """Setup rotating log file for console display"""
+    console_logger = logging.getLogger('console_log')
+    console_logger.setLevel(logging.INFO)
+    
+    # Clear existing handlers
+    console_logger.handlers = []
+    
+    # Create rotating file handler (max 1MB, keep 3 backups)
+    handler = RotatingFileHandler('console.log', maxBytes=1024*1024, backupCount=3)
+    formatter = logging.Formatter('%(asctime)s|%(levelname)s|%(message)s')
+    handler.setFormatter(formatter)
+    console_logger.addHandler(handler)
+    
+    return console_logger
+
+# Initialize console logger
+console_logger = setup_console_logger()
+
+def log_console(log_type, message, status='info'):
+    """Write to console log file"""
+    console_logger.info(f"{log_type}|{message}|{status}")
 
 # Configuration from environment variables
 DATABASE = os.getenv('DATABASE_PATH', 'social_media_accounts.db')
@@ -31,7 +57,7 @@ if not RSS_API_SECRET:
 
 jap_client = JAPClient(JAP_API_KEY)
 rss_client = RSSAppClient(RSS_API_KEY, RSS_API_SECRET)
-rss_poller = RSSPoller(DATABASE, rss_client, jap_client)
+rss_poller = RSSPoller(DATABASE, rss_client, jap_client, log_console)
 
 def get_db_connection():
     conn = sqlite3.connect(DATABASE)
@@ -185,6 +211,20 @@ def init_db():
         )
     ''')
     
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS processed_posts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            feed_id INTEGER NOT NULL,
+            post_guid TEXT NOT NULL,
+            post_url TEXT,
+            post_title TEXT,
+            processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            actions_triggered INTEGER DEFAULT 0,
+            FOREIGN KEY (feed_id) REFERENCES rss_feeds (id) ON DELETE CASCADE,
+            UNIQUE(feed_id, post_guid)
+        )
+    ''')
+    
     conn.commit()
     conn.close()
 
@@ -221,6 +261,9 @@ def create_account():
     )
     account_id = cursor.lastrowid
     conn.commit()
+    
+    # Log to console
+    log_console('ACCT', f'{data["username"]}@{data["platform"]} created | RSS: PENDING', 'pending')
     
     # Attempt to create RSS feed automatically
     rss_result = create_rss_feed_for_account(account_id, data['platform'], data['username'])
@@ -702,13 +745,23 @@ def refresh_execution_status(jap_order_id):
         if 'error' in jap_status:
             return jsonify({'error': jap_status['error']}), 400
         
-        # Update execution history
+        # Update execution history with cost if available
         conn = get_db_connection()
-        conn.execute('''
-            UPDATE execution_history 
-            SET status = ?, updated_at = CURRENT_TIMESTAMP 
-            WHERE jap_order_id = ?
-        ''', (jap_status.get('status', 'unknown').lower(), jap_order_id))
+        
+        # Check if JAP status includes cost information
+        cost = jap_status.get('charge', jap_status.get('cost', None))
+        if cost is not None:
+            conn.execute('''
+                UPDATE execution_history 
+                SET status = ?, cost = ?, updated_at = CURRENT_TIMESTAMP 
+                WHERE jap_order_id = ?
+            ''', (jap_status.get('status', 'unknown').lower(), float(cost), jap_order_id))
+        else:
+            conn.execute('''
+                UPDATE execution_history 
+                SET status = ?, updated_at = CURRENT_TIMESTAMP 
+                WHERE jap_order_id = ?
+            ''', (jap_status.get('status', 'unknown').lower(), jap_order_id))
         
         # Also update orders table if exists
         conn.execute('''
@@ -1290,6 +1343,205 @@ def get_logs_summary():
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/logs/console')
+def get_console_logs():
+    """Get console logs from log file"""
+    try:
+        limit = int(request.args.get('limit', 100))
+        log_type = request.args.get('type', 'all')
+        
+        logs = []
+        
+        # Read from console.log file
+        if os.path.exists('console.log'):
+            with open('console.log', 'r') as f:
+                lines = f.readlines()[-limit:]  # Get last N lines
+                lines.reverse()  # Newest first
+            
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                    
+                try:
+                    # Parse log format: timestamp|level|type|message|status
+                    parts = line.split('|')
+                    if len(parts) >= 4:
+                        timestamp_str = parts[0]
+                        level = parts[1] 
+                        type_and_message = '|'.join(parts[2:-1])
+                        status = parts[-1]
+                        
+                        # Extract log type from message
+                        if type_and_message.startswith('RSS|'):
+                            log_entry_type = 'RSS'
+                            message = type_and_message[4:]  # Remove 'RSS|'
+                        elif type_and_message.startswith('EXEC|'):
+                            log_entry_type = 'EXEC'  
+                            message = type_and_message[5:]  # Remove 'EXEC|'
+                        elif type_and_message.startswith('ACCT|'):
+                            log_entry_type = 'ACCT'
+                            message = type_and_message[5:]  # Remove 'ACCT|'
+                        else:
+                            log_entry_type = 'SYS'
+                            message = type_and_message
+                        
+                        # Filter by type if requested
+                        if log_type != 'all':
+                            if (log_type == 'rss' and log_entry_type != 'RSS') or \
+                               (log_type == 'execution' and log_entry_type != 'EXEC') or \
+                               (log_type == 'account' and log_entry_type != 'ACCT'):
+                                continue
+                        
+                        logs.append({
+                            'timestamp': timestamp_str,
+                            'type': log_entry_type,
+                            'message': message,
+                            'status': status
+                        })
+                        
+                except Exception as e:
+                    # Skip malformed lines
+                    continue
+        
+        return jsonify({
+            'logs': logs,
+            'total': len(logs),
+            'type': log_type
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/logs/console/clear', methods=['POST'])
+def clear_console_logs():
+    """Clear console log file"""
+    try:
+        # Clear the log file
+        with open('console.log', 'w') as f:
+            f.write('')
+        
+        # Log the clear action
+        log_console('SYS', 'Console logs cleared', 'info')
+        
+        return jsonify({
+            'success': True,
+            'message': 'Console logs cleared'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/settings', methods=['GET'])
+def get_settings():
+    """Get current system settings (masked sensitive data)"""
+    try:
+        def mask_key(key):
+            """Return masked version of API key"""
+            if not key:
+                return ''
+            # Show first 4 and last 4 characters with dots in between
+            if len(key) <= 8:
+                return '•' * len(key)
+            return key[:4] + '•' * (len(key) - 8) + key[-4:]
+        
+        return jsonify({
+            'jap_api_key': mask_key(JAP_API_KEY),
+            'rss_api_key': mask_key(RSS_API_KEY),
+            'rss_api_secret': mask_key(RSS_API_SECRET),
+            'jap_api_key_full': JAP_API_KEY,  # Full key for eye toggle (server-side only)
+            'rss_api_key_full': RSS_API_KEY,
+            'rss_api_secret_full': RSS_API_SECRET,
+            'polling_interval': rss_poller.polling_interval // 60,  # Convert to minutes
+            'time_zone': os.getenv('TIME_ZONE', 'UTC')
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/settings', methods=['POST'])
+def save_settings():
+    """Save system settings to .env file"""
+    try:
+        data = request.get_json()
+        
+        # Read current .env file
+        env_file = '.env'
+        env_vars = {}
+        
+        if os.path.exists(env_file):
+            with open(env_file, 'r') as f:
+                for line in f:
+                    if '=' in line and not line.strip().startswith('#'):
+                        key, value = line.strip().split('=', 1)
+                        env_vars[key] = value
+        
+        # Update with new values
+        if 'jap_api_key' in data:
+            env_vars['JAP_API_KEY'] = data['jap_api_key']
+        if 'rss_api_key' in data:
+            env_vars['RSS_API_KEY'] = data['rss_api_key']
+        if 'rss_api_secret' in data:
+            env_vars['RSS_API_SECRET'] = data['rss_api_secret']
+        if 'polling_interval' in data:
+            # Store in seconds for internal use
+            rss_poller.polling_interval = int(data['polling_interval']) * 60
+        if 'time_zone' in data:
+            env_vars['TIME_ZONE'] = data['time_zone']
+        
+        # Write back to .env file
+        with open(env_file, 'w') as f:
+            for key, value in env_vars.items():
+                f.write(f'{key}={value}\n')
+        
+        # Reload environment variables to pick up changes
+        load_dotenv(override=True)
+        
+        return jsonify({
+            'success': True,
+            'message': 'Settings saved successfully'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/settings/test-apis', methods=['POST'])
+def test_api_keys():
+    """Test API key validity"""
+    try:
+        data = request.get_json()
+        
+        test_results = {}
+        
+        # Test JAP API
+        try:
+            from jap_client import JAPClient
+            test_jap = JAPClient(data['jap_api_key'])
+            balance = test_jap.get_balance()
+            test_results['jap'] = 'valid' if 'balance' in balance else 'invalid'
+        except Exception as e:
+            test_results['jap'] = f'error: {str(e)}'
+        
+        # Test RSS.app API  
+        try:
+            from rss_client import RSSAppClient
+            test_rss = RSSAppClient(data['rss_api_key'], data['rss_api_secret'])
+            feeds = test_rss.list_feeds(limit=1)
+            test_results['rss'] = 'valid' if 'feeds' in feeds else 'invalid'
+        except Exception as e:
+            test_results['rss'] = f'error: {str(e)}'
+        
+        # Check if all tests passed
+        success = all('valid' in result for result in test_results.values())
+        
+        return jsonify({
+            'success': success,
+            'results': test_results,
+            'error': None if success else 'One or more API keys failed validation'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 
 def create_rss_feed_for_account(account_id: int, platform: str, username: str) -> dict:
     """Helper function to create RSS feed for a new account"""

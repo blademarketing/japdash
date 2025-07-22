@@ -19,13 +19,14 @@ class RSSPoller:
     - Logs all polling activity and triggered actions
     """
     
-    def __init__(self, database_path: str, rss_client: RSSAppClient, jap_client: JAPClient):
+    def __init__(self, database_path: str, rss_client: RSSAppClient, jap_client: JAPClient, log_console_func=None):
         self.database_path = database_path
         self.rss_client = rss_client
         self.jap_client = jap_client
-        self.polling_interval = 60  # 1 minute between polls
+        self.polling_interval = 900  # 15 minutes between polls (matches RSS.app refresh rate)
         self.is_running = False
         self.polling_thread = None
+        self.log_console = log_console_func or (lambda t, m, s: None)  # Optional logging function
     
     def get_db_connection(self):
         """Get database connection with row factory"""
@@ -60,7 +61,7 @@ class RSSPoller:
                 time.sleep(self.polling_interval)
             except Exception as e:
                 print(f"RSS Polling error: {str(e)}")
-                time.sleep(60)  # Wait 1 minute before retrying on error
+                time.sleep(300)  # Wait 5 minutes before retrying on error
     
     def poll_all_feeds(self) -> Dict[str, Any]:
         """
@@ -162,50 +163,100 @@ class RSSPoller:
             if not account or not account['rss_feed_url']:
                 raise Exception("No RSS feed URL found for account")
             
-            new_posts = self.rss_client.get_new_posts_from_xml_feed(account['rss_feed_url'], since_date)
+            # Get all posts for total count, then filter for new posts
+            all_posts_data = self.rss_client.parse_rss_xml_feed(account['rss_feed_url'])
+            total_posts_count = len(all_posts_data.get('items', []))
+            
+            potential_new_posts = self.rss_client.get_new_posts_from_xml_feed(account['rss_feed_url'], since_date)
             
             actions_triggered = 0
+            truly_new_posts = 0
             latest_post_date = since_date
             
-            # Process each new post
-            for post in new_posts:
+            # Process each potentially new post (with deduplication)
+            for post in potential_new_posts:
                 try:
-                    # Update latest post date
-                    if post.get('date_published'):
-                        post_date = datetime.fromisoformat(post['date_published'].replace('Z', '+00:00'))
-                        if post_date > latest_post_date:
-                            latest_post_date = post_date
+                    # Check if this post has already been processed
+                    post_guid = post.get('guid') or post.get('link', '')
+                    if not post_guid:
+                        continue
+                        
+                    existing_post = conn.execute('''
+                        SELECT id FROM processed_posts 
+                        WHERE feed_id = ? AND post_guid = ?
+                    ''', (feed['id'], post_guid)).fetchone()
                     
-                    # Trigger actions for this post
+                    if existing_post:
+                        print(f"Post {post_guid} already processed, skipping...")
+                        continue
+                    
+                    # This is a truly new post
+                    truly_new_posts += 1
+                    
+                    # Update latest post date for truly new posts
+                    if post.get('date_published'):
+                        try:
+                            post_date = datetime.fromisoformat(post['date_published'].replace('Z', '+00:00'))
+                            if post_date > latest_post_date:
+                                latest_post_date = post_date
+                        except ValueError:
+                            pass
+                    
+                    # Trigger actions for this new post
                     triggered = self.trigger_actions_for_post(feed, post)
                     actions_triggered += triggered
                     
+                    # Record this post as processed
+                    conn.execute('''
+                        INSERT OR IGNORE INTO processed_posts 
+                        (feed_id, post_guid, post_url, post_title, actions_triggered)
+                        VALUES (?, ?, ?, ?, ?)
+                    ''', (feed['id'], post_guid, post.get('link', ''), 
+                          post.get('title', ''), triggered))
+                    
                 except Exception as e:
-                    print(f"Error processing post {post.get('url', 'unknown')}: {str(e)}")
+                    print(f"Error processing post {post.get('link') or post.get('url', 'unknown')}: {str(e)}")
             
             # Update feed metadata
-            conn.execute('''
-                UPDATE rss_feeds 
-                SET last_checked = CURRENT_TIMESTAMP,
-                    last_post_date = ?
-                WHERE id = ?
-            ''', (latest_post_date.isoformat(), feed['id']))
+            if truly_new_posts > 0:
+                # Found new posts - advance last_post_date to prevent reprocessing
+                updated_post_date = latest_post_date + timedelta(seconds=1)
+                conn.execute('''
+                    UPDATE rss_feeds 
+                    SET last_checked = CURRENT_TIMESTAMP,
+                        last_post_date = ?
+                    WHERE id = ?
+                ''', (updated_post_date.isoformat(), feed['id']))
+            else:
+                # No new posts - only update last_checked, keep existing last_post_date
+                conn.execute('''
+                    UPDATE rss_feeds 
+                    SET last_checked = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                ''', (feed['id'],))
             
             # Log polling activity
-            status = 'no_new_posts' if len(new_posts) == 0 else 'success'
+            status = 'no_new_posts' if truly_new_posts == 0 else 'success'
             conn.execute('''
                 INSERT INTO rss_poll_log 
                 (feed_id, posts_found, new_posts, actions_triggered, status)
                 VALUES (?, ?, ?, ?, ?)
-            ''', (feed['id'], len(new_posts), len(new_posts), actions_triggered, status))
+            ''', (feed['id'], total_posts_count, truly_new_posts, actions_triggered, status))
+            
+            # Log to console
+            account_name = f"{feed.get('username', 'Unknown')}@{feed.get('platform', 'Unknown')}"
+            if truly_new_posts > 0:
+                self.log_console('RSS', f'{account_name}: New post found - {actions_triggered} actions triggered', 'success')
+            else:
+                self.log_console('RSS', f'{account_name}: No new posts', 'no_new_posts')
             
             conn.commit()
             
             return {
                 'feed_id': feed['id'],
                 'feed_title': feed['title'],
-                'posts_found': len(new_posts),
-                'new_posts': len(new_posts),
+                'posts_found': total_posts_count,
+                'new_posts': truly_new_posts,
                 'actions_triggered': actions_triggered,
                 'status': status
             }
@@ -277,7 +328,7 @@ class RSSPoller:
             parameters = json.loads(action['parameters'])
             
             # Determine target URL (prefer post URL, fallback to account URL)
-            target_url = post.get('url', account.get('url', f"https://{account['platform'].lower()}.com/{account['username']}"))
+            target_url = post.get('link') or post.get('url') or account.get('url', f"https://{account['platform'].lower()}.com/{account['username']}")
             
             # Create JAP order
             order_response = self.jap_client.create_order(
@@ -289,6 +340,16 @@ class RSSPoller:
             
             if 'error' in order_response:
                 return {'success': False, 'error': order_response['error']}
+            
+            # Estimate cost based on service rate if available
+            estimated_cost = 0
+            try:
+                # Try to get service rate from JAP client cache
+                service_info = self.jap_client.get_service_details(action['jap_service_id'])
+                if service_info and 'rate' in service_info:
+                    estimated_cost = (parameters.get('quantity', 100) / 1000) * float(service_info['rate'])
+            except:
+                pass  # Use 0 if can't calculate
             
             # Record execution in history
             conn.execute('''
@@ -304,19 +365,22 @@ class RSSPoller:
                 action['jap_service_id'],
                 action['service_name'],
                 parameters.get('quantity', 100),
-                0,  # Cost will be updated from JAP API
+                estimated_cost,  # Use estimated cost
                 'pending',
                 account['id'],
                 account['username'],
                 json.dumps({
                     **parameters,
-                    'triggered_by_post': post.get('url'),
+                    'triggered_by_post': post.get('link') or post.get('url'),
                     'post_title': post.get('title'),
                     'rss_feed_id': action.get('rss_app_feed_id')
                 })
             ))
             
             conn.commit()
+            
+            # Log to console  
+            self.log_console('EXEC', f'RSS_TRIGGER {account["platform"]}: {action["service_name"]} (ID: {order_response["order"]}) | PENDING', 'pending')
             
             return {
                 'success': True,
