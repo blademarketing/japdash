@@ -1731,7 +1731,13 @@ class SocialMediaManager {
             const data = await response.json();
             
             if (response.ok) {
-                this.showNotification(`Manual poll completed: ${data.summary}`, 'success');
+                const summary = `${data.feeds_processed}/${data.total_feeds} feeds checked, ${data.total_new_posts} new posts, ${data.total_actions_triggered} actions triggered`;
+                
+                if (data.total_feeds === 0) {
+                    this.showNotification('No accounts meet RSS polling requirements (need: active RSS + configured actions + enabled)', 'error');
+                } else {
+                    this.showNotification(`Manual poll completed: ${summary}`, 'success');
+                }
                 this.loadRSSLogs(); // Refresh logs
             } else {
                 this.showNotification(`Manual poll failed: ${data.error}`, 'error');
