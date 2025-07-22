@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Social Media Account Manager</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <div class="bg-white rounded-lg shadow-lg p-6">
+            <!-- Tab Navigation -->
+            <div class="flex justify-between items-center mb-6">
+                <div>
+                    <h1 class="text-3xl font-bold text-gray-800 mb-2">Social Media Dashboard</h1>
+                    <div class="flex gap-4">
+                        <button id="accountsTab" class="px-4 py-2 text-sm font-medium text-blue-600 border-b-2 border-blue-600">
+                            <i class="fas fa-users mr-2"></i>Accounts
+                        </button>
+                        <button id="historyTab" class="px-4 py-2 text-sm font-medium text-gray-500 border-b-2 border-transparent hover:text-gray-700">
+                            <i class="fas fa-history mr-2"></i>History
+                        </button>
+                    </div>
+                </div>
+                <div class="flex gap-3">
+                    <button id="quickExecuteBtn" class="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors">
+                        <i class="fas fa-bolt"></i>
+                        Quick Execute
+                    </button>
+                    <button id="addBtn" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors">
+                        <i class="fas fa-plus"></i>
+                        Add Account
+                    </button>
+                </div>
+            </div>
+
+            <!-- Accounts Tab Content -->
+            <div id="accountsContent">
+                <!-- Account Table -->
+                <div class="overflow-x-auto">
+                    <table class="w-full table-auto">
+                        <thead>
+                            <tr class="bg-gray-100">
+                                <th class="px-4 py-3 text-left text-gray-600 font-medium">Platform</th>
+                                <th class="px-4 py-3 text-left text-gray-600 font-medium">Username</th>
+                                <th class="px-4 py-3 text-left text-gray-600 font-medium">Display Name</th>
+                                <th class="px-4 py-3 text-left text-gray-600 font-medium">URL</th>
+                                <th class="px-4 py-3 text-left text-gray-600 font-medium">RSS Status</th>
+                                <th class="px-4 py-3 text-left text-gray-600 font-medium">Post Triggers</th>
+                                <th class="px-4 py-3 text-left text-gray-600 font-medium">Management</th>
+                            </tr>
+                        </thead>
+                        <tbody id="accountsTable" class="divide-y divide-gray-200">
+                            <!-- Accounts will be loaded here -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Empty State -->
+                <div id="emptyState" class="hidden text-center py-12">
+                    <i class="fas fa-users-slash text-gray-400 text-6xl mb-4"></i>
+                    <h3 class="text-xl text-gray-600 mb-2">No accounts found</h3>
+                    <p class="text-gray-500 mb-4">Start by adding your first social media account</p>
+                    <button class="bg-blue-500 hover:bg-blue-600 text-white px-6 py-2 rounded-lg transition-colors">
+                        Add Account
+                    </button>
+                </div>
+            </div>
+
+            <!-- History Tab Content -->
+            <div id="historyContent" class="hidden">
+                <!-- Filters -->
+                <div class="mb-6 p-4 bg-gray-50 rounded-lg">
+                    <h3 class="font-semibold mb-3">Filters</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Execution Type</label>
+                            <select id="filterExecutionType" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md">
+                                <option value="">All Types</option>
+                                <option value="instant">Instant</option>
+                                <option value="rss_trigger">RSS Trigger</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Platform</label>
+                            <select id="filterPlatform" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md">
+                                <option value="">All Platforms</option>
+                                <option value="Instagram">Instagram</option>
+                                <option value="Facebook">Facebook</option>
+                                <option value="X">X</option>
+                                <option value="TikTok">TikTok</option>
+                                <option value="YouTube">YouTube</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                            <select id="filterStatus" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md">
+                                <option value="">All Statuses</option>
+                                <option value="pending">Pending</option>
+                                <option value="in_progress">In Progress</option>
+                                <option value="completed">Completed</option>
+                                <option value="partial">Partial</option>
+                                <option value="canceled">Canceled</option>
+                            </select>
+                        </div>
+                        <div class="flex items-end">
+                            <button id="applyFilters" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md text-sm transition-colors">
+                                Apply Filters
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- History Stats -->
+                <div id="historyStats" class="mb-6 grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <!-- Stats will be loaded here -->
+                </div>
+
+                <!-- History Table -->
+                <div class="overflow-x-auto">
+                    <table class="w-full table-auto text-sm">
+                        <thead>
+                            <tr class="bg-gray-100">
+                                <th class="px-3 py-2 text-left text-gray-600 font-medium">Order ID</th>
+                                <th class="px-3 py-2 text-left text-gray-600 font-medium">Type</th>
+                                <th class="px-3 py-2 text-left text-gray-600 font-medium">Platform</th>
+                                <th class="px-3 py-2 text-left text-gray-600 font-medium">Account</th>
+                                <th class="px-3 py-2 text-left text-gray-600 font-medium">Service</th>
+                                <th class="px-3 py-2 text-left text-gray-600 font-medium">Target</th>
+                                <th class="px-3 py-2 text-left text-gray-600 font-medium">Quantity</th>
+                                <th class="px-3 py-2 text-left text-gray-600 font-medium">Status</th>
+                                <th class="px-3 py-2 text-left text-gray-600 font-medium">Date</th>
+                                <th class="px-3 py-2 text-left text-gray-600 font-medium">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="historyTable" class="divide-y divide-gray-200">
+                            <!-- History will be loaded here -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Empty History State -->
+                <div id="emptyHistoryState" class="hidden text-center py-12">
+                    <i class="fas fa-history text-gray-400 text-6xl mb-4"></i>
+                    <h3 class="text-xl text-gray-600 mb-2">No executions found</h3>
+                    <p class="text-gray-500 mb-4">Execute some actions to see them here</p>
+                </div>
+
+                <!-- Pagination -->
+                <div id="historyPagination" class="mt-6 flex justify-between items-center">
+                    <div class="text-sm text-gray-600">
+                        Showing <span id="historyStart">0</span>-<span id="historyEnd">0</span> of <span id="historyTotal">0</span> results
+                    </div>
+                    <div class="flex gap-2">
+                        <button id="historyPrevBtn" class="px-3 py-1 text-sm border rounded hover:bg-gray-50 disabled:opacity-50" disabled>
+                            Previous
+                        </button>
+                        <button id="historyNextBtn" class="px-3 py-1 text-sm border rounded hover:bg-gray-50 disabled:opacity-50" disabled>
+                            Next
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal -->
+    <div id="modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-6 w-full max-w-md mx-4">
+            <div class="flex justify-between items-center mb-4">
+                <h2 id="modalTitle" class="text-xl font-bold text-gray-800">Add Account</h2>
+                <button id="closeModal" class="text-gray-500 hover:text-gray-700">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <form id="accountForm">
+                <input type="hidden" id="accountId">
+                
+                <div class="mb-4">
+                    <label for="platform" class="block text-sm font-medium text-gray-700 mb-2">Platform</label>
+                    <select id="platform" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="">Select Platform</option>
+                        <option value="Instagram">Instagram</option>
+                        <option value="Facebook">Facebook</option>
+                        <option value="X">X</option>
+                        <option value="TikTok">TikTok</option>
+                    </select>
+                </div>
+
+                <div class="mb-4">
+                    <label for="username" class="block text-sm font-medium text-gray-700 mb-2">Username</label>
+                    <input type="text" id="username" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="@username">
+                </div>
+
+                <div class="mb-4">
+                    <label for="displayName" class="block text-sm font-medium text-gray-700 mb-2">Display Name</label>
+                    <input type="text" id="displayName" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Display Name">
+                </div>
+
+                <div class="mb-6">
+                    <label for="url" class="block text-sm font-medium text-gray-700 mb-2">Profile URL</label>
+                    <input type="url" id="url" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="https://...">
+                </div>
+
+                <div class="flex gap-3">
+                    <button type="submit" class="flex-1 bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded-md transition-colors">
+                        Save Account
+                    </button>
+                    <button type="button" id="cancelBtn" class="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-700 py-2 px-4 rounded-md transition-colors">
+                        Cancel
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Action Configuration Modal -->
+    <div id="actionModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-6 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-4">
+                <h2 id="actionModalTitle" class="text-xl font-bold text-gray-800">Configure New Post Triggers</h2>
+                <button id="closeActionModal" class="text-gray-500 hover:text-gray-700">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <div id="actionModalContent">
+                <!-- Account Info -->
+                <div id="actionAccountInfo" class="mb-6 p-4 bg-gray-50 rounded-lg">
+                    <!-- Will be populated with account details -->
+                </div>
+
+                <!-- JAP Balance -->
+                <div id="japBalance" class="mb-6 p-4 bg-blue-50 rounded-lg">
+                    <div class="flex items-center gap-2">
+                        <i class="fas fa-wallet text-blue-600"></i>
+                        <span class="font-medium">JAP Balance: </span>
+                        <span id="balanceAmount" class="text-blue-600 font-bold">Loading...</span>
+                    </div>
+                </div>
+
+                <!-- Existing Actions -->
+                <div id="existingActions" class="mb-6">
+                    <h3 class="text-lg font-semibold mb-3">Configured Actions</h3>
+                    <div id="actionsList" class="space-y-2">
+                        <!-- Actions will be loaded here -->
+                    </div>
+                </div>
+
+                <!-- Add New Action -->
+                <div id="newActionForm" class="border-t pt-6">
+                    <h3 class="text-lg font-semibold mb-4">Add New Action</h3>
+                    
+                    <form id="actionConfigForm">
+                        <input type="hidden" id="actionAccountId">
+                        
+                        <div class="mb-4">
+                            <label for="actionType" class="block text-sm font-medium text-gray-700 mb-2">Action Type</label>
+                            <select id="actionType" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <option value="">Select Action Type</option>
+                            </select>
+                        </div>
+
+                        <div class="mb-4">
+                            <label for="japService" class="block text-sm font-medium text-gray-700 mb-2">
+                                Service
+                                <span class="text-xs text-gray-500 ml-2">(Type service ID or search by name)</span>
+                            </label>
+                            <div class="relative">
+                                <input type="text" id="serviceSearch" 
+                                       placeholder="Type service ID (e.g. 1234) or search by name..." 
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <select id="japService" required class="hidden w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                    <option value="">Select Service</option>
+                                </select>
+                                <div id="serviceDropdown" class="absolute z-10 w-full bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto hidden">
+                                    <!-- Filtered services will appear here -->
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="serviceDetails" class="mb-4 p-3 bg-yellow-50 rounded border hidden">
+                            <!-- Service details will be shown here -->
+                        </div>
+
+                        <!-- Dynamic Parameters -->
+                        <div id="dynamicParameters" class="space-y-4 mb-6">
+                            <!-- Parameters will be generated dynamically -->
+                        </div>
+
+                        <div class="flex gap-3">
+                            <button type="submit" class="flex-1 bg-green-500 hover:bg-green-600 text-white py-2 px-4 rounded-md transition-colors">
+                                <i class="fas fa-rss mr-2"></i>Configure RSS Trigger
+                            </button>
+                            <button type="button" id="cancelActionBtn" class="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-700 py-2 px-4 rounded-md transition-colors">
+                                Cancel
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Execute Modal -->
+    <div id="quickExecuteModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-6 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold text-gray-800">
+                    <i class="fas fa-bolt text-orange-500 mr-2"></i>
+                    Quick Execute Action
+                </h2>
+                <button id="closeQuickExecuteModal" class="text-gray-500 hover:text-gray-700">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <!-- JAP Balance -->
+            <div class="mb-6 p-4 bg-blue-50 rounded-lg">
+                <div class="flex items-center gap-2">
+                    <i class="fas fa-wallet text-blue-600"></i>
+                    <span class="font-medium">JAP Balance: </span>
+                    <span id="quickBalanceAmount" class="text-blue-600 font-bold">Loading...</span>
+                </div>
+            </div>
+
+            <form id="quickExecuteForm">
+                <!-- Platform Selection -->
+                <div class="mb-4">
+                    <label for="quickPlatform" class="block text-sm font-medium text-gray-700 mb-2">Platform</label>
+                    <select id="quickPlatform" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="">Select Platform</option>
+                        <option value="Instagram">Instagram</option>
+                        <option value="Facebook">Facebook</option>
+                        <option value="X">X (Twitter)</option>
+                        <option value="TikTok">TikTok</option>
+                        <option value="YouTube">YouTube</option>
+                        <option value="other">Other</option>
+                    </select>
+                </div>
+
+                <!-- Action Type Selection -->
+                <div class="mb-4">
+                    <label for="quickActionType" class="block text-sm font-medium text-gray-700 mb-2">Action Type</label>
+                    <select id="quickActionType" required class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="">First select a platform</option>
+                    </select>
+                </div>
+
+                <!-- Service Selection -->
+                <div class="mb-4">
+                    <label for="quickJapService" class="block text-sm font-medium text-gray-700 mb-2">
+                        Service
+                        <span class="text-xs text-gray-500 ml-2">(Type service ID or search by name)</span>
+                    </label>
+                    <div class="relative">
+                        <input type="text" id="quickServiceSearch" 
+                               placeholder="First select action type..." 
+                               disabled
+                               class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100">
+                        <select id="quickJapService" required class="hidden">
+                            <option value="">Select Service</option>
+                        </select>
+                        <div id="quickServiceDropdown" class="absolute z-10 w-full bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto hidden">
+                            <!-- Filtered services will appear here -->
+                        </div>
+                    </div>
+                </div>
+
+                <div id="quickServiceDetails" class="mb-4 p-3 bg-yellow-50 rounded border hidden">
+                    <!-- Service details will be shown here -->
+                </div>
+
+                <!-- Target URL -->
+                <div class="mb-4">
+                    <label for="quickTargetUrl" class="block text-sm font-medium text-gray-700 mb-2">
+                        Target URL
+                        <span class="text-xs text-gray-500 ml-2" id="urlHelpText">Select a service first</span>
+                    </label>
+                    <input type="url" id="quickTargetUrl" required 
+                           placeholder="Enter the target URL..."
+                           class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+
+                <!-- Dynamic Parameters -->
+                <div id="quickDynamicParameters" class="space-y-4 mb-6">
+                    <!-- Parameters will be generated dynamically -->
+                </div>
+
+                <div class="flex gap-3">
+                    <button type="submit" class="flex-1 bg-red-500 hover:bg-red-600 text-white py-2 px-4 rounded-md transition-colors">
+                        <i class="fas fa-bolt mr-2"></i>Execute Now
+                    </button>
+                    <button type="button" id="cancelQuickExecuteBtn" class="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-700 py-2 px-4 rounded-md transition-colors">
+                        Cancel
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

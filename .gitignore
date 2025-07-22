@@ -1,0 +1,26 @@
+# Virtual Environment
+venv/
+__pycache__/
+*.pyc
+
+# Database files
+*.db
+
+# Environment variables
+.env
+
+# IDE/Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Claude settings (optional - you may want to keep this)
+# .claude/
