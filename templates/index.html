@@ -50,6 +50,7 @@
                                 <th class="px-4 py-3 text-left text-gray-600 font-medium">Display Name</th>
                                 <th class="px-4 py-3 text-left text-gray-600 font-medium">URL</th>
                                 <th class="px-4 py-3 text-left text-gray-600 font-medium">RSS Status</th>
+                                <th class="px-4 py-3 text-left text-gray-600 font-medium">Enabled</th>
                                 <th class="px-4 py-3 text-left text-gray-600 font-medium">Post Triggers</th>
                                 <th class="px-4 py-3 text-left text-gray-600 font-medium">Management</th>
                             </tr>
@@ -173,16 +174,11 @@
                     <div class="flex justify-between items-center">
                         <div>
                             <h3 class="font-semibold text-blue-800">RSS Polling Service</h3>
-                            <p id="rssServiceStatus" class="text-sm text-blue-600">Checking status...</p>
+                            <p id="rssServiceStatus" class="text-sm text-blue-600">Always running - polls every 60 seconds</p>
+                            <p class="text-xs text-blue-500 mt-1">Only enabled accounts with RSS feeds and configured actions are monitored</p>
                         </div>
                         <div class="flex gap-2">
-                            <button id="startRSSBtn" class="bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded text-sm transition-colors">
-                                <i class="fas fa-play mr-1"></i>Start
-                            </button>
-                            <button id="stopRSSBtn" class="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded text-sm transition-colors">
-                                <i class="fas fa-stop mr-1"></i>Stop
-                            </button>
-                            <button id="pollNowBtn" class="bg-orange-500 hover:bg-orange-600 text-white px-3 py-1 rounded text-sm transition-colors">
+                            <button id="pollNowBtn" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm transition-colors">
                                 <i class="fas fa-sync mr-1"></i>Poll Now
                             </button>
                         </div>

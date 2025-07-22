@@ -79,6 +79,11 @@ def init_db():
     except:
         pass  # Column already exists
     
+    try:
+        conn.execute('ALTER TABLE accounts ADD COLUMN enabled BOOLEAN DEFAULT 1')
+    except:
+        pass  # Column already exists
+    
     # Actions table - defines what actions can be performed on accounts
     conn.execute('''
         CREATE TABLE IF NOT EXISTS actions (
@@ -298,6 +303,28 @@ def delete_account(account_id):
     }
     
     return jsonify(response_data)
+
+@app.route('/api/accounts/<int:account_id>/toggle', methods=['POST'])
+def toggle_account_enabled(account_id):
+    """Toggle account enabled status"""
+    conn = get_db_connection()
+    
+    # Get current status
+    account = conn.execute('SELECT enabled FROM accounts WHERE id = ?', (account_id,)).fetchone()
+    if not account:
+        conn.close()
+        return jsonify({'error': 'Account not found'}), 404
+    
+    # Toggle status
+    new_status = 0 if account['enabled'] else 1
+    conn.execute('UPDATE accounts SET enabled = ? WHERE id = ?', (new_status, account_id))
+    conn.commit()
+    conn.close()
+    
+    return jsonify({
+        'message': f'Account {"enabled" if new_status else "disabled"} successfully',
+        'enabled': bool(new_status)
+    })
 
 # JAP Integration Endpoints
 
@@ -1301,6 +1328,12 @@ def save_rss_feed_to_db(rss_feed: dict, feed_type: str, account_id: int = None) 
 
 if __name__ == '__main__':
     init_db()
+    
+    # Auto-start RSS polling service
+    print("🚀 Starting RSS polling service...")
+    rss_start_result = rss_poller.start_polling()
+    print(f"RSS Polling: {rss_start_result['message']}")
+    
     # Server configuration from environment variables
     host = os.getenv('FLASK_HOST', '0.0.0.0')
     port = int(os.getenv('FLASK_PORT', 5079))

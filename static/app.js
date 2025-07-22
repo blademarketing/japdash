@@ -67,8 +67,6 @@ class SocialMediaManager {
         document.getElementById('historyNextBtn').addEventListener('click', () => this.historyNextPage());
         
         // Logs events
-        document.getElementById('startRSSBtn').addEventListener('click', () => this.startRSSPolling());
-        document.getElementById('stopRSSBtn').addEventListener('click', () => this.stopRSSPolling());
         document.getElementById('pollNowBtn').addEventListener('click', () => this.pollRSSNow());
         document.getElementById('rssLogsTab').addEventListener('click', () => this.switchLogsTab('rss'));
         document.getElementById('executionLogsTab').addEventListener('click', () => this.switchLogsTab('execution'));
@@ -144,6 +142,9 @@ class SocialMediaManager {
                 </td>
                 <td class="px-4 py-3">
                     ${this.renderRSSStatus(account)}
+                </td>
+                <td class="px-4 py-3">
+                    ${this.renderEnabledToggle(account)}
                 </td>
                 <td class="px-4 py-3">
                     <button onclick="app.openActionModal(${account.id})" class="bg-purple-500 hover:bg-purple-600 text-white px-3 py-1 rounded text-sm transition-colors">
@@ -259,6 +260,40 @@ class SocialMediaManager {
                         </button>
                     </div>
                 `;
+        }
+    }
+
+    renderEnabledToggle(account) {
+        const enabled = account.enabled !== undefined ? account.enabled : true; // Default to enabled for legacy accounts
+        
+        return `
+            <button 
+                onclick="app.toggleAccountEnabled(${account.id})" 
+                class="flex items-center justify-center w-12 h-6 rounded-full transition-colors ${enabled ? 'bg-green-500' : 'bg-gray-300'}"
+                title="${enabled ? 'Account enabled - included in RSS polling' : 'Account disabled - excluded from RSS polling'}"
+            >
+                <div class="w-4 h-4 bg-white rounded-full transform transition-transform ${enabled ? 'translate-x-3' : 'translate-x-1'}"></div>
+            </button>
+        `;
+    }
+
+    async toggleAccountEnabled(accountId) {
+        try {
+            const response = await fetch(`/api/accounts/${accountId}/toggle`, {
+                method: 'POST'
+            });
+            
+            const data = await response.json();
+            
+            if (response.ok) {
+                this.showNotification(data.message, 'success');
+                await this.loadAccounts(); // Reload to show updated status
+            } else {
+                this.showNotification(`Failed to toggle account: ${data.error}`, 'error');
+            }
+        } catch (error) {
+            console.error('Error toggling account:', error);
+            this.showNotification('Error toggling account status', 'error');
         }
     }
 
@@ -1536,11 +1571,12 @@ class SocialMediaManager {
         
         if (rssService.is_running) {
             statusEl.innerHTML = `
-                <span class="text-green-600">✅ Running</span> 
-                (${rssService.active_feeds_count || 0} feeds monitored, last poll: ${rssService.last_poll_time || 'Never'})
+                <span class="text-green-600">✅ Active</span> - 
+                ${rssService.active_feeds_count || 0} accounts being monitored
+                <br><span class="text-xs text-blue-500">Last poll: ${rssService.last_poll_time || 'Never'}</span>
             `;
         } else {
-            statusEl.innerHTML = '<span class="text-red-600">❌ Stopped</span>';
+            statusEl.innerHTML = '<span class="text-red-600">❌ Service not running</span>';
         }
     }
 
@@ -1688,39 +1724,6 @@ class SocialMediaManager {
     }
 
     // RSS Service Control Methods
-    async startRSSPolling() {
-        try {
-            const response = await fetch('/api/rss/start', { method: 'POST' });
-            const data = await response.json();
-            
-            if (response.ok) {
-                this.showNotification('RSS polling service started', 'success');
-                this.loadLogsSummary(); // Refresh status
-            } else {
-                this.showNotification(`Failed to start RSS polling: ${data.error}`, 'error');
-            }
-        } catch (error) {
-            console.error('Error starting RSS polling:', error);
-            this.showNotification('Error starting RSS polling service', 'error');
-        }
-    }
-
-    async stopRSSPolling() {
-        try {
-            const response = await fetch('/api/rss/stop', { method: 'POST' });
-            const data = await response.json();
-            
-            if (response.ok) {
-                this.showNotification('RSS polling service stopped', 'success');
-                this.loadLogsSummary(); // Refresh status
-            } else {
-                this.showNotification(`Failed to stop RSS polling: ${data.error}`, 'error');
-            }
-        } catch (error) {
-            console.error('Error stopping RSS polling:', error);
-            this.showNotification('Error stopping RSS polling service', 'error');
-        }
-    }
 
     async pollRSSNow() {
         try {

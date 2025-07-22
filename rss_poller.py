@@ -77,12 +77,15 @@ class RSSPoller:
         conn = self.get_db_connection()
         
         try:
-            # Get feeds that are ready for monitoring
+            # Get feeds that meet the 3 requirements for RSS polling:
+            # 1. RSS Feed Successfully Created (rss_status = 'active')
+            # 2. Has Configured Actions (at least one active action)  
+            # 3. Account Enabled (enabled = 1)
             active_feeds = conn.execute('''
-                SELECT rf.* FROM rss_feeds rf
+                SELECT rf.*, a.username, a.platform FROM rss_feeds rf
                 INNER JOIN accounts a ON rf.account_id = a.id
-                WHERE rf.is_active = 1 
-                  AND a.rss_status = 'active'
+                WHERE a.rss_status = 'active'
+                  AND a.enabled = 1
                   AND rf.last_post_date IS NOT NULL
                   AND EXISTS (
                       SELECT 1 FROM actions 
