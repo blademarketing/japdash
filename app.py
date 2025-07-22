@@ -4,17 +4,30 @@ import sqlite3
 import os
 import json
 from datetime import datetime
+from dotenv import load_dotenv
 from jap_client import JAPClient
 from rss_client import RSSAppClient
 from rss_poller import RSSPoller
 
+# Load environment variables from .env file
+load_dotenv()
+
 app = Flask(__name__)
 CORS(app)
 
-DATABASE = 'social_media_accounts.db'
-JAP_API_KEY = 'e33231a4232bf67f7cd762b6f197e33c'
-RSS_API_KEY = 'c_dSj4adPAIDt2TF'
-RSS_API_SECRET = 's_nTYF8GEKFjFlltnEXSN7ZB'
+# Configuration from environment variables
+DATABASE = os.getenv('DATABASE_PATH', 'social_media_accounts.db')
+JAP_API_KEY = os.getenv('JAP_API_KEY')
+RSS_API_KEY = os.getenv('RSS_API_KEY')
+RSS_API_SECRET = os.getenv('RSS_API_SECRET')
+
+# Validate required environment variables
+if not JAP_API_KEY:
+    raise ValueError("JAP_API_KEY environment variable is required")
+if not RSS_API_KEY:
+    raise ValueError("RSS_API_KEY environment variable is required")
+if not RSS_API_SECRET:
+    raise ValueError("RSS_API_SECRET environment variable is required")
 
 jap_client = JAPClient(JAP_API_KEY)
 rss_client = RSSAppClient(RSS_API_KEY, RSS_API_SECRET)
@@ -252,11 +265,39 @@ def update_account(account_id):
 @app.route('/api/accounts/<int:account_id>', methods=['DELETE'])
 def delete_account(account_id):
     conn = get_db_connection()
+    
+    # Get account and RSS feed info before deletion
+    account = conn.execute('SELECT * FROM accounts WHERE id=?', (account_id,)).fetchone()
+    if not account:
+        conn.close()
+        return jsonify({'error': 'Account not found'}), 404
+    
+    rss_cleanup_result = {'rss_deleted': False, 'rss_error': None}
+    
+    # Clean up RSS feed from RSS.app if it exists
+    if account['rss_feed_id']:
+        try:
+            # Delete from RSS.app
+            rss_client.delete_feed(account['rss_feed_id'])
+            rss_cleanup_result['rss_deleted'] = True
+            print(f"✅ Deleted RSS feed {account['rss_feed_id']} from RSS.app for account {account['username']}")
+        except Exception as e:
+            rss_cleanup_result['rss_error'] = str(e)
+            print(f"⚠️ Warning: Could not delete RSS feed from RSS.app: {e}")
+            # Continue with account deletion even if RSS cleanup fails
+    
+    # Delete account (cascade will handle related records in rss_feeds, actions, etc.)
     conn.execute('DELETE FROM accounts WHERE id=?', (account_id,))
     conn.commit()
     conn.close()
     
-    return jsonify({'message': 'Account deleted successfully'})
+    response_data = {
+        'message': 'Account deleted successfully',
+        'account_username': account['username'],
+        'rss_cleanup': rss_cleanup_result
+    }
+    
+    return jsonify(response_data)
 
 # JAP Integration Endpoints
 
@@ -1084,4 +1125,9 @@ def save_rss_feed_to_db(rss_feed: dict, feed_type: str, account_id: int = None) 
 
 if __name__ == '__main__':
     init_db()
-    app.run(debug=True, host='0.0.0.0', port=5079)
+    # Server configuration from environment variables
+    host = os.getenv('FLASK_HOST', '0.0.0.0')
+    port = int(os.getenv('FLASK_PORT', 5079))
+    debug = os.getenv('FLASK_DEBUG', 'True').lower() == 'true'
+    
+    app.run(debug=debug, host=host, port=port)

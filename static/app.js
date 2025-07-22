@@ -1381,18 +1381,30 @@ class SocialMediaManager {
     }
 
     async deleteAccount(id) {
-        if (!confirm('Are you sure you want to delete this account and all its actions?')) return;
+        if (!confirm('Are you sure you want to delete this account, all its actions, and its RSS feed?')) return;
 
         try {
             const response = await fetch(`/api/accounts/${id}`, {
                 method: 'DELETE'
             });
 
+            const data = await response.json();
+
             if (response.ok) {
                 this.loadAccounts();
-                this.showNotification('Account deleted successfully!', 'success');
+                
+                // Show detailed success message including RSS cleanup status
+                let message = `Account "${data.account_username}" deleted successfully!`;
+                
+                if (data.rss_cleanup.rss_deleted) {
+                    message += ' RSS feed removed from RSS.app.';
+                } else if (data.rss_cleanup.rss_error) {
+                    message += ` (RSS cleanup warning: ${data.rss_cleanup.rss_error})`;
+                }
+                
+                this.showNotification(message, 'success');
             } else {
-                this.showNotification('Error deleting account', 'error');
+                this.showNotification(data.error || 'Error deleting account', 'error');
             }
         } catch (error) {
             console.error('Error deleting account:', error);
