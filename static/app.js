@@ -1570,10 +1570,13 @@ class SocialMediaManager {
         const statusEl = document.getElementById('rssServiceStatus');
         
         if (rssService.is_running) {
+            const feedCount = rssService.active_feeds || rssService.active_feeds_count || 0;
+            const lastPoll = rssService.last_poll || rssService.last_poll_time || 'Never';
+            
             statusEl.innerHTML = `
                 <span class="text-green-600">✅ Active</span> - 
-                ${rssService.active_feeds_count || 0} accounts being monitored
-                <br><span class="text-xs text-blue-500">Last poll: ${rssService.last_poll_time || 'Never'}</span>
+                ${feedCount} accounts being monitored
+                <br><span class="text-xs text-blue-500">Last poll: ${lastPoll === 'Never' ? 'Never' : new Date(lastPoll).toLocaleString()}</span>
             `;
         } else {
             statusEl.innerHTML = '<span class="text-red-600">❌ Service not running</span>';
@@ -1730,10 +1733,17 @@ class SocialMediaManager {
             const response = await fetch('/api/rss/poll-now', { method: 'POST' });
             const data = await response.json();
             
+            console.log('Poll response data:', data); // Debug log
+            
             if (response.ok) {
-                const summary = `${data.feeds_processed}/${data.total_feeds} feeds checked, ${data.total_new_posts} new posts, ${data.total_actions_triggered} actions triggered`;
+                const feeds_processed = data.feeds_processed || 0;
+                const total_feeds = data.total_feeds || 0;
+                const total_new_posts = data.total_new_posts || 0;
+                const total_actions_triggered = data.total_actions_triggered || 0;
                 
-                if (data.total_feeds === 0) {
+                const summary = `${feeds_processed}/${total_feeds} feeds checked, ${total_new_posts} new posts, ${total_actions_triggered} actions triggered`;
+                
+                if (total_feeds === 0) {
                     this.showNotification('No accounts meet RSS polling requirements (need: active RSS + configured actions + enabled)', 'error');
                 } else {
                     this.showNotification(`Manual poll completed: ${summary}`, 'success');

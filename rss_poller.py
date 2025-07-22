@@ -441,10 +441,19 @@ class RSSPoller:
                 WHERE poll_time >= datetime('now', '-1 hour')
             ''').fetchone()
             
-            # Get active feeds count
-            active_feeds = conn.execute(
-                'SELECT COUNT(*) as count FROM rss_feeds WHERE is_active = 1'
-            ).fetchone()
+            # Get active feeds count (using same logic as polling)
+            active_feeds = conn.execute('''
+                SELECT COUNT(*) as count FROM rss_feeds rf
+                INNER JOIN accounts a ON rf.account_id = a.id
+                WHERE a.rss_status = 'active'
+                  AND a.enabled = 1
+                  AND rf.last_post_date IS NOT NULL
+                  AND EXISTS (
+                      SELECT 1 FROM actions 
+                      WHERE account_id = rf.account_id 
+                      AND is_active = 1
+                  )
+            ''').fetchone()
             
             # Get last poll time
             last_poll = conn.execute(
