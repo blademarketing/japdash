@@ -264,13 +264,25 @@ class SocialMediaManager {
     }
 
     renderEnabledToggle(account) {
-        const enabled = account.enabled !== undefined ? account.enabled : true; // Default to enabled for legacy accounts
+        const enabled = account.enabled !== undefined ? account.enabled : false; // Default to disabled for new accounts
+        const hasActions = account.action_count > 0;
         
+        if (!hasActions) {
+            // Account has no actions - show disabled toggle with tooltip
+            return `
+                <div class="flex items-center justify-center w-12 h-6 rounded-full bg-gray-200 cursor-not-allowed opacity-50" 
+                     title="Configure at least 1 action first to enable RSS monitoring">
+                    <div class="w-4 h-4 bg-gray-400 rounded-full transform translate-x-1"></div>
+                </div>
+            `;
+        }
+        
+        // Account has actions - show functional toggle
         return `
             <button 
                 onclick="app.toggleAccountEnabled(${account.id})" 
-                class="flex items-center justify-center w-12 h-6 rounded-full transition-colors ${enabled ? 'bg-green-500' : 'bg-gray-300'}"
-                title="${enabled ? 'Account enabled - included in RSS polling' : 'Account disabled - excluded from RSS polling'}"
+                class="flex items-center justify-center w-12 h-6 rounded-full transition-colors ${enabled ? 'bg-green-500 hover:bg-green-600' : 'bg-gray-300 hover:bg-gray-400'}"
+                title="${enabled ? 'Account enabled - included in RSS polling' : 'Account disabled - click to enable RSS monitoring'}"
             >
                 <div class="w-4 h-4 bg-white rounded-full transform transition-transform ${enabled ? 'translate-x-3' : 'translate-x-1'}"></div>
             </button>
@@ -278,6 +290,13 @@ class SocialMediaManager {
     }
 
     async toggleAccountEnabled(accountId) {
+        // Find the account to check if it has actions
+        const account = this.accounts.find(acc => acc.id === accountId);
+        if (!account || account.action_count === 0) {
+            this.showNotification('Configure at least 1 action before enabling RSS monitoring', 'error');
+            return;
+        }
+        
         try {
             const response = await fetch(`/api/accounts/${accountId}/toggle`, {
                 method: 'POST'

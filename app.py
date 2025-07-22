@@ -80,7 +80,7 @@ def init_db():
         pass  # Column already exists
     
     try:
-        conn.execute('ALTER TABLE accounts ADD COLUMN enabled BOOLEAN DEFAULT 1')
+        conn.execute('ALTER TABLE accounts ADD COLUMN enabled BOOLEAN DEFAULT 0')
     except:
         pass  # Column already exists
     
@@ -195,7 +195,13 @@ def index():
 @app.route('/api/accounts', methods=['GET'])
 def get_accounts():
     conn = get_db_connection()
-    accounts = conn.execute('SELECT * FROM accounts ORDER BY created_at DESC').fetchall()
+    accounts = conn.execute('''
+        SELECT a.*, COUNT(ac.id) as action_count
+        FROM accounts a
+        LEFT JOIN actions ac ON a.id = ac.account_id AND ac.is_active = 1
+        GROUP BY a.id
+        ORDER BY a.created_at DESC
+    ''').fetchall()
     conn.close()
     return jsonify([dict(account) for account in accounts])
 
@@ -208,10 +214,10 @@ def create_account():
     
     conn = get_db_connection()
     
-    # Insert account with initial RSS status as 'pending'
+    # Insert account with initial RSS status as 'pending' and disabled by default
     cursor = conn.execute(
-        'INSERT INTO accounts (platform, username, display_name, url, rss_status) VALUES (?, ?, ?, ?, ?)',
-        (data['platform'], data['username'], data.get('display_name', ''), data.get('url', ''), 'pending')
+        'INSERT INTO accounts (platform, username, display_name, url, rss_status, enabled) VALUES (?, ?, ?, ?, ?, ?)',
+        (data['platform'], data['username'], data.get('display_name', ''), data.get('url', ''), 'pending', 0)
     )
     account_id = cursor.lastrowid
     conn.commit()
@@ -400,6 +406,11 @@ def create_account_action(account_id):
         (account_id,)
     ).fetchone()['count'] == 1
     
+    # If this is the first action, enable the account automatically
+    if first_action:
+        conn.execute('UPDATE accounts SET enabled = 1 WHERE id = ?', (account_id,))
+        conn.commit()
+    
     conn.close()
     
     # If this is the first action, establish baseline to prevent triggering on existing posts
@@ -407,7 +418,12 @@ def create_account_action(account_id):
     if first_action:
         baseline_result = rss_poller.establish_baseline_for_account(account_id)
     
-    response_data = {'action_id': action_id, 'message': 'Action created successfully'}
+    if first_action:
+        message = 'First action created successfully! Account automatically enabled for RSS monitoring.'
+    else:
+        message = 'Action created successfully'
+    
+    response_data = {'action_id': action_id, 'message': message}
     if baseline_result:
         response_data['baseline'] = baseline_result
     
@@ -417,11 +433,36 @@ def create_account_action(account_id):
 def delete_action(action_id):
     """Delete an action"""
     conn = get_db_connection()
+    
+    # Get account_id before deletion to check remaining actions
+    action = conn.execute('SELECT account_id FROM actions WHERE id=?', (action_id,)).fetchone()
+    if not action:
+        conn.close()
+        return jsonify({'error': 'Action not found'}), 404
+    
+    account_id = action['account_id']
+    
+    # Delete the action
     conn.execute('DELETE FROM actions WHERE id=?', (action_id,))
     conn.commit()
+    
+    # Check if this was the last action for this account
+    remaining_actions = conn.execute(
+        'SELECT COUNT(*) as count FROM actions WHERE account_id = ? AND is_active = 1', 
+        (account_id,)
+    ).fetchone()['count']
+    
+    # If no actions remain, disable the account automatically
+    if remaining_actions == 0:
+        conn.execute('UPDATE accounts SET enabled = 0 WHERE id = ?', (account_id,))
+        conn.commit()
+        message = 'Action deleted successfully. Account automatically disabled (no actions remaining).'
+    else:
+        message = 'Action deleted successfully'
+    
     conn.close()
     
-    return jsonify({'message': 'Action deleted successfully'})
+    return jsonify({'message': message})
 
 @app.route('/api/actions/<int:action_id>/execute', methods=['POST'])
 def execute_action(action_id):
