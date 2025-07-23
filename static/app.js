@@ -2116,3 +2116,87 @@ class SocialMediaManager {
 
 // Initialize the app
 const app = new SocialMediaManager();
+
+// Global logout function
+function logout() {
+    if (confirm('Are you sure you want to logout?')) {
+        window.location.href = '/logout';
+    }
+}
+
+// Global password change function
+async function changePassword() {
+    const currentPassword = document.getElementById('currentPassword').value;
+    const newPassword = document.getElementById('newPassword').value;
+    const confirmPassword = document.getElementById('confirmPassword').value;
+    
+    // Validation
+    if (!currentPassword || !newPassword || !confirmPassword) {
+        alert('Please fill in all password fields');
+        return;
+    }
+    
+    if (newPassword !== confirmPassword) {
+        alert('New password and confirmation do not match');
+        return;
+    }
+    
+    if (newPassword.length < 6) {
+        alert('New password must be at least 6 characters long');
+        return;
+    }
+    
+    // Confirm password change
+    if (!confirm('Are you sure you want to change your password?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/auth/change-password', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                current_password: currentPassword,
+                new_password: newPassword
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            alert('Password changed successfully!');
+            // Clear form
+            document.getElementById('currentPassword').value = '';
+            document.getElementById('newPassword').value = '';
+            document.getElementById('confirmPassword').value = '';
+        } else {
+            alert('Error: ' + result.error);
+        }
+    } catch (error) {
+        alert('Error changing password: ' + error.message);
+    }
+}
+
+// Global error handler for authentication
+window.addEventListener('unhandledrejection', function(event) {
+    if (event.reason && event.reason.status === 401) {
+        alert('Your session has expired. Please log in again.');
+        window.location.href = '/login';
+    }
+});
+
+// Add authentication check to all fetch requests
+const originalFetch = window.fetch;
+window.fetch = function(...args) {
+    return originalFetch.apply(this, args)
+        .then(response => {
+            if (response.status === 401) {
+                alert('Your session has expired. Please log in again.');
+                window.location.href = '/login';
+                return Promise.reject(new Error('Authentication required'));
+            }
+            return response;
+        });
+};

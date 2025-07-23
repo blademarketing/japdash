@@ -8,6 +8,9 @@ requests==2.32.4
 # Environment Configuration
 python-dotenv==1.0.0
 
+# Authentication
+Flask-Login==0.6.3
+
 # Database (sqlite3 is built-in with Python)
 # No additional database dependencies needed
 

@@ -1,9 +1,11 @@
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, redirect, url_for, session, flash
 from flask_cors import CORS
+from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
+from werkzeug.security import generate_password_hash, check_password_hash
 import sqlite3
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import logging
 from logging.handlers import RotatingFileHandler
@@ -17,6 +19,76 @@ load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
+
+# Configure Flask-Login
+app.secret_key = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
+app.permanent_session_lifetime = timedelta(minutes=int(os.getenv('SESSION_TIMEOUT', 30)))
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
+login_manager.login_message = 'Please log in to access the dashboard.'
+login_manager.login_message_category = 'info'
+
+# User class for Flask-Login
+class User(UserMixin):
+    def __init__(self, user_id):
+        self.id = user_id
+
+@login_manager.user_loader
+def load_user(user_id):
+    # Simple single-user system - if user_id is 'admin', return admin user
+    if user_id == 'admin':
+        return User('admin')
+    return None
+
+def verify_password(username, password):
+    """Verify username and password against environment variables"""
+    expected_username = os.getenv('ADMIN_USERNAME', 'admin')
+    expected_password_hash = os.getenv('ADMIN_PASSWORD_HASH')
+    
+    # If no password hash is set, create one from plain password (development mode)
+    if not expected_password_hash:
+        plain_password = os.getenv('ADMIN_PASSWORD', 'admin')
+        expected_password_hash = generate_password_hash(plain_password)
+    
+    if username == expected_username and check_password_hash(expected_password_hash, password):
+        return True
+    return False
+
+def is_internal_request():
+    """Check if request is from internal background services"""
+    # Check for internal service header
+    if request.headers.get('X-Internal-Service') == 'true':
+        return True
+    
+    # Check if request is from localhost (background services)
+    if request.remote_addr in ['127.0.0.1', '::1', 'localhost']:
+        # Check if user agent suggests internal service
+        user_agent = request.headers.get('User-Agent', '').lower()
+        if 'python' in user_agent or not user_agent:
+            return True
+    
+    return False
+
+def smart_auth_required(f):
+    """Custom decorator that requires auth for web requests but allows internal requests"""
+    from functools import wraps
+    
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # Allow internal requests to bypass authentication
+        if is_internal_request():
+            return f(*args, **kwargs)
+        
+        # For web requests, require authentication
+        if not current_user.is_authenticated:
+            if request.is_json:
+                return jsonify({'error': 'Authentication required'}), 401
+            return redirect(url_for('login', next=request.url))
+        
+        return f(*args, **kwargs)
+    
+    return decorated_function
 
 # Setup console logger for log file
 def setup_console_logger():
@@ -236,11 +308,42 @@ def init_db():
     conn.commit()
     conn.close()
 
+# Authentication Routes
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        remember = request.form.get('remember') == 'on'
+        
+        if verify_password(username, password):
+            user = User('admin')
+            login_user(user, remember=remember)
+            session.permanent = True
+            
+            next_page = request.args.get('next')
+            if next_page:
+                return redirect(next_page)
+            return redirect(url_for('index'))
+        else:
+            flash('Invalid username or password', 'error')
+    
+    return render_template('login.html')
+
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    flash('You have been logged out', 'info')
+    return redirect(url_for('login'))
+
 @app.route('/')
+@login_required
 def index():
     return render_template('index.html')
 
 @app.route('/api/accounts', methods=['GET'])
+@smart_auth_required
 def get_accounts():
     conn = get_db_connection()
     accounts = conn.execute('''
@@ -254,6 +357,7 @@ def get_accounts():
     return jsonify([dict(account) for account in accounts])
 
 @app.route('/api/accounts', methods=['POST'])
+@smart_auth_required
 def create_account():
     data = request.get_json()
     
@@ -308,6 +412,7 @@ def create_account():
     return jsonify(response_data), 201
 
 @app.route('/api/accounts/<int:account_id>', methods=['PUT'])
+@smart_auth_required
 def update_account(account_id):
     data = request.get_json()
     
@@ -325,6 +430,7 @@ def update_account(account_id):
     return jsonify({'message': 'Account updated successfully'})
 
 @app.route('/api/accounts/<int:account_id>', methods=['DELETE'])
+@smart_auth_required
 def delete_account(account_id):
     conn = get_db_connection()
     
@@ -362,6 +468,7 @@ def delete_account(account_id):
     return jsonify(response_data)
 
 @app.route('/api/accounts/<int:account_id>/toggle', methods=['POST'])
+@smart_auth_required
 def toggle_account_enabled(account_id):
     """Toggle account enabled status"""
     conn = get_db_connection()
@@ -386,6 +493,7 @@ def toggle_account_enabled(account_id):
 # JAP Integration Endpoints
 
 @app.route('/api/jap/services/<platform>', methods=['GET'])
+@smart_auth_required
 def get_jap_services(platform):
     """Get JAP services for a specific platform"""
     try:
@@ -395,6 +503,7 @@ def get_jap_services(platform):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/jap/balance', methods=['GET'])
+@smart_auth_required
 def get_jap_balance():
     """Get JAP account balance"""
     try:
@@ -404,6 +513,7 @@ def get_jap_balance():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/accounts/<int:account_id>/actions', methods=['GET'])
+@smart_auth_required
 def get_account_actions(account_id):
     """Get all actions for an account"""
     conn = get_db_connection()
@@ -428,6 +538,7 @@ def get_account_actions(account_id):
     return jsonify(result)
 
 @app.route('/api/accounts/<int:account_id>/actions', methods=['POST'])
+@smart_auth_required
 def create_account_action(account_id):
     """Create a new action for an account"""
     data = request.get_json()
@@ -481,6 +592,7 @@ def create_account_action(account_id):
     return jsonify(response_data), 201
 
 @app.route('/api/actions/<int:action_id>', methods=['DELETE'])
+@smart_auth_required
 def delete_action(action_id):
     """Delete an action"""
     conn = get_db_connection()
@@ -516,6 +628,7 @@ def delete_action(action_id):
     return jsonify({'message': message})
 
 @app.route('/api/actions/<int:action_id>/execute', methods=['POST'])
+@smart_auth_required
 def execute_action(action_id):
     """Execute an action (create JAP order)"""
     conn = get_db_connection()
@@ -588,6 +701,7 @@ def execute_action(action_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/orders/<int:order_id>/status', methods=['GET'])
+@smart_auth_required
 def get_order_status(order_id):
     """Get status of a JAP order"""
     conn = get_db_connection()
@@ -615,6 +729,7 @@ def get_order_status(order_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/actions/quick-execute', methods=['POST'])
+@smart_auth_required
 def quick_execute_action():
     """Execute an action immediately and record in execution history"""
     try:
@@ -675,6 +790,7 @@ def quick_execute_action():
 # History and monitoring endpoints
 
 @app.route('/api/history')
+@smart_auth_required
 def get_execution_history():
     """Get execution history with optional filtering"""
     try:
@@ -744,6 +860,7 @@ def get_execution_history():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/history/<jap_order_id>/refresh-status', methods=['POST'])
+@smart_auth_required
 def refresh_execution_status(jap_order_id):
     """Refresh status for a specific execution from JAP API"""
     try:
@@ -790,6 +907,7 @@ def refresh_execution_status(jap_order_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/history/stats')
+@smart_auth_required
 def get_execution_stats():
     """Get execution statistics for dashboard"""
     try:
@@ -911,6 +1029,7 @@ def rss_webhook():
 # RSS Feed Management Endpoints
 
 @app.route('/api/rss/status')
+@smart_auth_required
 def get_rss_status():
     """Get RSS polling service status"""
     try:
@@ -920,6 +1039,7 @@ def get_rss_status():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/rss/start', methods=['POST'])
+@smart_auth_required
 def start_rss_polling():
     """Start RSS polling service"""
     try:
@@ -929,6 +1049,7 @@ def start_rss_polling():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/rss/stop', methods=['POST'])
+@smart_auth_required
 def stop_rss_polling():
     """Stop RSS polling service"""
     try:
@@ -938,6 +1059,7 @@ def stop_rss_polling():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/rss/poll-now', methods=['POST'])
+@smart_auth_required
 def poll_rss_now():
     """Manually trigger RSS polling for all feeds"""
     try:
@@ -947,6 +1069,7 @@ def poll_rss_now():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/rss/feeds')
+@smart_auth_required
 def list_rss_feeds():
     """List all RSS feeds in our database"""
     try:
@@ -964,6 +1087,7 @@ def list_rss_feeds():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/rss/feeds', methods=['POST'])
+@smart_auth_required
 def create_rss_feed():
     """Create a new RSS feed"""
     try:
@@ -1006,6 +1130,7 @@ def create_rss_feed():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/rss/feeds/<int:feed_id>', methods=['DELETE'])
+@smart_auth_required
 def delete_rss_feed(feed_id):
     """Delete an RSS feed"""
     try:
@@ -1034,6 +1159,7 @@ def delete_rss_feed(feed_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/rss/feeds/<int:feed_id>/toggle', methods=['POST'])
+@smart_auth_required
 def toggle_rss_feed(feed_id):
     """Toggle RSS feed active status"""
     try:
@@ -1060,6 +1186,7 @@ def toggle_rss_feed(feed_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/rss/test-connection')
+@smart_auth_required
 def test_rss_connection():
     """Test RSS.app API connection"""
     try:
@@ -1069,6 +1196,7 @@ def test_rss_connection():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/accounts/<int:account_id>/rss-feed', methods=['POST'])
+@smart_auth_required
 def create_account_rss_feed(account_id):
     """Create or retry RSS feed for specific account"""
     try:
@@ -1106,6 +1234,7 @@ def create_account_rss_feed(account_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/accounts/<int:account_id>/rss-baseline', methods=['POST'])
+@smart_auth_required
 def establish_rss_baseline(account_id):
     """Establish RSS baseline for an account"""
     try:
@@ -1115,6 +1244,7 @@ def establish_rss_baseline(account_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/accounts/<int:account_id>/rss-status', methods=['POST'])
+@smart_auth_required
 def refresh_account_rss_status(account_id):
     """Refresh RSS feed status for an account"""
     try:
@@ -1179,6 +1309,7 @@ def refresh_account_rss_status(account_id):
 # Logging and Activity Endpoints
 
 @app.route('/api/logs/rss-polling')
+@smart_auth_required
 def get_rss_polling_logs():
     """Get RSS polling activity logs"""
     try:
@@ -1218,6 +1349,7 @@ def get_rss_polling_logs():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/logs/execution-activity')
+@smart_auth_required
 def get_execution_activity_logs():
     """Get recent execution activity with more details"""
     try:
@@ -1261,6 +1393,7 @@ def get_execution_activity_logs():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/logs/account-activity')
+@smart_auth_required
 def get_account_activity_logs():
     """Get account-related activity logs"""
     try:
@@ -1297,6 +1430,7 @@ def get_account_activity_logs():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/logs/summary')
+@smart_auth_required
 def get_logs_summary():
     """Get summary statistics for the logs dashboard"""
     try:
@@ -1353,6 +1487,7 @@ def get_logs_summary():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/logs/console')
+@smart_auth_required
 def get_console_logs():
     """Get console logs from log file"""
     try:
@@ -1423,6 +1558,7 @@ def get_console_logs():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/logs/console/clear', methods=['POST'])
+@smart_auth_required
 def clear_console_logs():
     """Clear console log file"""
     try:
@@ -1441,6 +1577,7 @@ def clear_console_logs():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/settings', methods=['GET'])
+@smart_auth_required
 def get_settings():
     """Get current system settings (masked sensitive data)"""
     try:
@@ -1467,6 +1604,7 @@ def get_settings():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/settings', methods=['POST'])
+@smart_auth_required
 def save_settings():
     """Save system settings to .env file"""
     try:
@@ -1560,7 +1698,65 @@ def save_settings():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/auth/change-password', methods=['POST'])
+@smart_auth_required
+def change_password():
+    """Change user password"""
+    try:
+        data = request.get_json()
+        current_password = data.get('current_password')
+        new_password = data.get('new_password')
+        
+        if not current_password or not new_password:
+            return jsonify({'error': 'Current password and new password are required'}), 400
+        
+        # Verify current password
+        current_username = os.getenv('ADMIN_USERNAME', 'admin')
+        if not verify_password(current_username, current_password):
+            return jsonify({'error': 'Current password is incorrect'}), 400
+        
+        # Validate new password strength
+        if len(new_password) < 6:
+            return jsonify({'error': 'New password must be at least 6 characters long'}), 400
+        
+        # Generate hash for new password
+        new_password_hash = generate_password_hash(new_password)
+        
+        # Update .env file
+        env_file = '.env'
+        env_vars = {}
+        
+        if os.path.exists(env_file):
+            with open(env_file, 'r') as f:
+                for line in f:
+                    if '=' in line and not line.strip().startswith('#'):
+                        key, value = line.strip().split('=', 1)
+                        env_vars[key] = value
+        
+        # Update password hash
+        env_vars['ADMIN_PASSWORD_HASH'] = new_password_hash
+        # Remove plain password if it exists
+        if 'ADMIN_PASSWORD' in env_vars:
+            del env_vars['ADMIN_PASSWORD']
+        
+        # Write back to .env file
+        with open(env_file, 'w') as f:
+            for key, value in env_vars.items():
+                f.write(f'{key}={value}\n')
+        
+        # Reload environment variables
+        load_dotenv(override=True)
+        
+        return jsonify({
+            'success': True,
+            'message': 'Password changed successfully'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/settings/test-apis', methods=['POST'])
+@smart_auth_required
 def test_api_keys():
     """Test API key validity"""
     try:
@@ -1599,6 +1795,7 @@ def test_api_keys():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/test/llm', methods=['POST'])
+@smart_auth_required
 def test_llm_generation():
     """Test LLM comment generation"""
     try:
