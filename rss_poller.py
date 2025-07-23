@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from rss_client import RSSAppClient
 from jap_client import JAPClient
+from llm_client import FlowiseClient
 
 
 class RSSPoller:
@@ -27,6 +28,13 @@ class RSSPoller:
         self.is_running = False
         self.polling_thread = None
         self.log_console = log_console_func or (lambda t, m, s: None)  # Optional logging function
+        
+        # Initialize LLM client for comment generation
+        self.llm_client = FlowiseClient(
+            endpoint_url="https://flowise.electric-marinade.com/api/v1/prediction/f474d703-0582-4170-a5e1-22d49c9472cd",
+            api_key="_iutUPVRnWyGKyoZfj1t0WIdLMZCcvAF8ONsBy3LhUU",
+            log_console_func=log_console_func
+        )
     
     def get_db_connection(self):
         """Get database connection with row factory"""
@@ -180,17 +188,23 @@ class RSSPoller:
                     post_guid = post.get('guid') or post.get('link', '')
                     if not post_guid:
                         continue
-                        
-                    existing_post = conn.execute('''
-                        SELECT id FROM processed_posts 
-                        WHERE feed_id = ? AND post_guid = ?
-                    ''', (feed['id'], post_guid)).fetchone()
                     
-                    if existing_post:
+                    # Atomic check-and-insert to prevent race conditions
+                    # First, try to insert the post as processed (this will fail if already exists)
+                    try:
+                        conn.execute('''
+                            INSERT INTO processed_posts 
+                            (feed_id, post_guid, post_url, post_title, actions_triggered)
+                            VALUES (?, ?, ?, ?, ?)
+                        ''', (feed['id'], post_guid, post.get('link', ''), 
+                              post.get('title', ''), 0))
+                        conn.commit()  # Commit immediately to prevent other threads from processing same post
+                    except sqlite3.IntegrityError:
+                        # Post already exists - skip processing
                         print(f"Post {post_guid} already processed, skipping...")
                         continue
                     
-                    # This is a truly new post
+                    # This is a truly new post that we just claimed for processing
                     truly_new_posts += 1
                     
                     # Update latest post date for truly new posts
@@ -206,13 +220,12 @@ class RSSPoller:
                     triggered = self.trigger_actions_for_post(feed, post)
                     actions_triggered += triggered
                     
-                    # Record this post as processed
+                    # Update the processed post record with actual actions triggered
                     conn.execute('''
-                        INSERT OR IGNORE INTO processed_posts 
-                        (feed_id, post_guid, post_url, post_title, actions_triggered)
-                        VALUES (?, ?, ?, ?, ?)
-                    ''', (feed['id'], post_guid, post.get('link', ''), 
-                          post.get('title', ''), triggered))
+                        UPDATE processed_posts 
+                        SET actions_triggered = ?
+                        WHERE feed_id = ? AND post_guid = ?
+                    ''', (triggered, feed['id'], post_guid))
                     
                 except Exception as e:
                     print(f"Error processing post {post.get('link') or post.get('url', 'unknown')}: {str(e)}")
@@ -302,8 +315,12 @@ class RSSPoller:
                         result = self.execute_rss_triggered_action(dict(account), dict(action), post)
                         if result.get('success'):
                             actions_triggered += 1
+                        elif result.get('skipped'):
+                            # Action was skipped (LLM failure or duplicate) - don't count as error
+                            pass
                     except Exception as e:
                         print(f"Error executing action {action['id']}: {str(e)}")
+                        self.log_console('EXEC', f'Action error: {str(e)}', 'error')
             
             return actions_triggered
             
@@ -330,12 +347,41 @@ class RSSPoller:
             # Determine target URL (prefer post URL, fallback to account URL)
             target_url = post.get('link') or post.get('url') or account.get('url', f"https://{account['platform'].lower()}.com/{account['username']}")
             
+            # Check if this exact action has already been executed for this post (duplicate prevention)
+            post_identifier = post.get('link') or post.get('url') or post.get('guid', '')
+            if post_identifier:
+                existing_execution = conn.execute('''
+                    SELECT id FROM execution_history 
+                    WHERE account_id = ? AND service_id = ? AND target_url = ? 
+                    AND created_at > datetime('now', '-24 hours')
+                ''', (account['id'], action['jap_service_id'], target_url)).fetchone()
+                
+                if existing_execution:
+                    self.log_console('EXEC', f'Action already executed for this post - skipping duplicate', 'skipped')
+                    return {'success': False, 'error': 'Duplicate execution prevented', 'skipped': True}
+            
+            # Check if this is a comment service with LLM generation enabled
+            custom_comments = parameters.get('custom_comments')
+            if self._is_comment_service_with_llm(action, parameters):
+                # Generate comments using LLM
+                llm_result = self._generate_comments_for_post(action, parameters, post, account)
+                
+                if llm_result['success']:
+                    # Use generated comments
+                    custom_comments = '\n'.join(llm_result['comments'])
+                    self.log_console('LLM', f'Using {len(llm_result["comments"])} generated comments', 'success')
+                else:
+                    # LLM generation failed - skip this action
+                    error_msg = f"LLM generation failed: {llm_result['error']} - skipping action"
+                    self.log_console('EXEC', f'RSS_TRIGGER {account["platform"]}: {action["service_name"]} | SKIPPED | {error_msg}', 'error')
+                    return {'success': False, 'error': error_msg, 'skipped': True}
+            
             # Create JAP order
             order_response = self.jap_client.create_order(
                 service_id=action['jap_service_id'],
                 link=target_url,
                 quantity=parameters.get('quantity', 100),
-                custom_comments=parameters.get('custom_comments')
+                custom_comments=custom_comments
             )
             
             if 'error' in order_response:
@@ -352,6 +398,19 @@ class RSSPoller:
                 pass  # Use 0 if can't calculate
             
             # Record execution in history
+            execution_params = {
+                **parameters,
+                'triggered_by_post': post.get('link') or post.get('url'),
+                'post_title': post.get('title'),
+                'post_content': post.get('title', '') + ' ' + post.get('description', '')[:200],
+                'rss_feed_id': action.get('rss_app_feed_id')
+            }
+            
+            # Add LLM metadata if comments were generated
+            if self._is_comment_service_with_llm(action, parameters):
+                execution_params['llm_generated'] = True
+                execution_params['original_directives'] = parameters.get('comment_directives', '')
+            
             conn.execute('''
                 INSERT INTO execution_history 
                 (jap_order_id, execution_type, platform, target_url, service_id, service_name, 
@@ -365,22 +424,18 @@ class RSSPoller:
                 action['jap_service_id'],
                 action['service_name'],
                 parameters.get('quantity', 100),
-                estimated_cost,  # Use estimated cost
+                estimated_cost,
                 'pending',
                 account['id'],
                 account['username'],
-                json.dumps({
-                    **parameters,
-                    'triggered_by_post': post.get('link') or post.get('url'),
-                    'post_title': post.get('title'),
-                    'rss_feed_id': action.get('rss_app_feed_id')
-                })
+                json.dumps(execution_params)
             ))
             
             conn.commit()
             
             # Log to console  
-            self.log_console('EXEC', f'RSS_TRIGGER {account["platform"]}: {action["service_name"]} (ID: {order_response["order"]}) | PENDING', 'pending')
+            execution_type = 'LLM+RSS_TRIGGER' if self._is_comment_service_with_llm(action, parameters) else 'RSS_TRIGGER'
+            self.log_console('EXEC', f'{execution_type} {account["platform"]}: {action["service_name"]} (ID: {order_response["order"]}) | PENDING', 'pending')
             
             return {
                 'success': True,
@@ -392,6 +447,77 @@ class RSSPoller:
             return {'success': False, 'error': str(e)}
         finally:
             conn.close()
+    
+    def _is_comment_service_with_llm(self, action: Dict[str, Any], parameters: Dict[str, Any]) -> bool:
+        """
+        Check if this is a comment service with LLM generation enabled
+        
+        Args:
+            action: Action configuration
+            parameters: Action parameters
+            
+        Returns:
+            True if this is a comment service with LLM enabled
+        """
+        # Check if service name contains "comment" (case insensitive)
+        service_name = action.get('service_name', '').lower()
+        is_comment_service = 'comment' in service_name
+        
+        # Check if LLM generation is enabled in parameters
+        llm_enabled = parameters.get('use_llm_generation', False)
+        has_directives = bool(parameters.get('comment_directives', '').strip())
+        
+        return is_comment_service and llm_enabled and has_directives
+    
+    def _generate_comments_for_post(self, action: Dict[str, Any], parameters: Dict[str, Any], 
+                                  post: Dict[str, Any], account: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Generate comments for a post using LLM
+        
+        Args:
+            action: Action configuration
+            parameters: Action parameters with LLM settings
+            post: RSS post data
+            account: Account information
+            
+        Returns:
+            Dict with success status and generated comments or error
+        """
+        try:
+            # Extract post content for LLM context
+            post_title = post.get('title', '')
+            post_description = post.get('description', '')
+            post_content = f"{post_title} {post_description}".strip()
+            
+            # If no meaningful content, use basic info
+            if not post_content:
+                post_content = f"New post from {account['username']} on {account['platform']}"
+            
+            # Get LLM parameters
+            comment_count = parameters.get('comment_count', 5)
+            comment_directives = parameters.get('comment_directives', 'Generate engaging and relevant comments')
+            use_hashtags = parameters.get('use_hashtags', False)
+            use_emojis = parameters.get('use_emojis', True)
+            
+            # Ensure comment count is within bounds
+            comment_count = max(1, min(comment_count, 100))
+            
+            # Generate comments using Flowise
+            result = self.llm_client.generate_comments(
+                post_content=post_content,
+                comment_count=comment_count,
+                custom_input=comment_directives,
+                use_hashtags=use_hashtags,
+                use_emojis=use_emojis
+            )
+            
+            return result
+            
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f'Comment generation error: {str(e)}'
+            }
     
     def establish_baseline_for_account(self, account_id: int) -> Dict[str, Any]:
         """
