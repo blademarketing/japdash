@@ -2054,7 +2054,7 @@ class SocialMediaManager {
             const result = await response.json();
             
             if (response.ok) {
-                this.showNotification('Settings saved successfully! Restart may be required for some changes.', 'success');
+                this.showNotification(result.message || 'Settings saved successfully!', 'success');
                 this.loadSettings(); // Reload to show updated masked values
             } else {
                 this.showNotification(`Error saving settings: ${result.error}`, 'error');

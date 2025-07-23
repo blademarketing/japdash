@@ -1470,6 +1470,9 @@ def get_settings():
 def save_settings():
     """Save system settings to .env file"""
     try:
+        # Declare global variables at the start
+        global JAP_API_KEY, RSS_API_KEY, RSS_API_SECRET, jap_client, rss_client, rss_poller
+        
         data = request.get_json()
         
         # Read current .env file
@@ -1504,9 +1507,54 @@ def save_settings():
         # Reload environment variables to pick up changes
         load_dotenv(override=True)
         
+        # Update global variables with new values
+        updated_components = []
+        rss_was_running = rss_poller.is_running
+        
+        # Update API key globals
+        if 'jap_api_key' in data:
+            JAP_API_KEY = data['jap_api_key']
+            updated_components.append('JAP API client')
+        if 'rss_api_key' in data:
+            RSS_API_KEY = data['rss_api_key']
+            updated_components.append('RSS API client')
+        if 'rss_api_secret' in data:
+            RSS_API_SECRET = data['rss_api_secret']
+            if 'RSS API client' not in updated_components:
+                updated_components.append('RSS API client')
+        
+        # Recreate client instances with updated API keys
+        if 'jap_api_key' in data:
+            jap_client = JAPClient(JAP_API_KEY)
+        
+        if 'rss_api_key' in data or 'rss_api_secret' in data:
+            rss_client = RSSAppClient(RSS_API_KEY, RSS_API_SECRET)
+            
+            # Recreate RSS poller with updated client
+            # Stop current poller if running
+            if rss_poller.is_running:
+                rss_poller.stop_polling()
+            
+            # Create new poller instance
+            rss_poller = RSSPoller(DATABASE, rss_client, jap_client, log_console)
+            
+            # Auto-restart RSS polling if it was running before
+            if rss_was_running:
+                rss_poller.start_polling()
+                updated_components.append('RSS polling service (restarted)')
+            else:
+                updated_components.append('RSS polling service (ready)')
+        
+        # Build informative message
+        if updated_components:
+            components_str = ', '.join(updated_components)
+            message = f'Settings saved and applied immediately. Updated: {components_str}.'
+        else:
+            message = 'Settings saved successfully.'
+        
         return jsonify({
             'success': True,
-            'message': 'Settings saved successfully'
+            'message': message
         })
         
     except Exception as e:
