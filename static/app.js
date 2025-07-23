@@ -293,10 +293,10 @@ class SocialMediaManager {
         return `
             <button 
                 onclick="app.toggleAccountEnabled(${account.id})" 
-                class="flex items-center justify-center w-12 h-6 rounded-full transition-colors ${enabled ? 'bg-green-500 hover:bg-green-600' : 'bg-gray-300 hover:bg-gray-400'}"
+                class="flex items-center w-12 h-6 rounded-full transition-colors ${enabled ? 'bg-green-500 hover:bg-green-600 justify-end' : 'bg-gray-300 hover:bg-gray-400 justify-start'}"
                 title="${enabled ? 'Account enabled - included in RSS polling' : 'Account disabled - click to enable RSS monitoring'}"
             >
-                <div class="w-4 h-4 bg-white rounded-full transform transition-transform ${enabled ? 'translate-x-3' : 'translate-x-1'}"></div>
+                <div class="w-4 h-4 bg-white rounded-full transform transition-transform ${enabled ? 'mr-1' : 'ml-1'}"></div>
             </button>
         `;
     }
@@ -807,10 +807,11 @@ class SocialMediaManager {
 
             if (response.ok) {
                 const result = await response.json();
-                this.showNotification('Action configured successfully! It will be triggered by RSS feed updates.', 'success');
+                this.showNotification(result.message || 'Action configured successfully!', 'success');
                 
-                // Reload actions list
+                // Reload actions list and main accounts table
                 await this.loadAccountActions(accountId);
+                await this.loadAccounts();
                 
                 // Reset form
                 document.getElementById('actionConfigForm').reset();
@@ -913,12 +914,14 @@ class SocialMediaManager {
             });
 
             if (response.ok) {
-                this.showNotification('Action deleted successfully!', 'success');
+                const result = await response.json();
+                this.showNotification(result.message || 'Action deleted successfully!', 'success');
                 
-                // Reload actions
+                // Reload actions and main accounts table
                 if (this.currentActionAccount) {
                     await this.loadAccountActions(this.currentActionAccount.id);
                 }
+                await this.loadAccounts();
             } else {
                 this.showNotification('Error deleting action', 'error');
             }

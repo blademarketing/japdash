@@ -473,8 +473,8 @@ def toggle_account_enabled(account_id):
     """Toggle account enabled status"""
     conn = get_db_connection()
     
-    # Get current status
-    account = conn.execute('SELECT enabled FROM accounts WHERE id = ?', (account_id,)).fetchone()
+    # Get current status and account details for logging
+    account = conn.execute('SELECT enabled, platform, username FROM accounts WHERE id = ?', (account_id,)).fetchone()
     if not account:
         conn.close()
         return jsonify({'error': 'Account not found'}), 404
@@ -484,6 +484,10 @@ def toggle_account_enabled(account_id):
     conn.execute('UPDATE accounts SET enabled = ? WHERE id = ?', (new_status, account_id))
     conn.commit()
     conn.close()
+    
+    # Log the action
+    action = "enabled" if new_status else "disabled"
+    log_console('ACCT', f"Account {action}: {account['platform']} @{account['username']} (ID: {account_id})", 'success')
     
     return jsonify({
         'message': f'Account {"enabled" if new_status else "disabled"} successfully',
@@ -568,20 +572,15 @@ def create_account_action(account_id):
         (account_id,)
     ).fetchone()['count'] == 1
     
-    # If this is the first action, enable the account automatically
-    if first_action:
-        conn.execute('UPDATE accounts SET enabled = 1 WHERE id = ?', (account_id,))
-        conn.commit()
-    
     conn.close()
     
-    # If this is the first action, establish baseline to prevent triggering on existing posts
+    # If this is the first action, establish baseline to prevent triggering on existing posts, but don't auto-enable
     baseline_result = None
     if first_action:
         baseline_result = rss_poller.establish_baseline_for_account(account_id)
     
     if first_action:
-        message = 'First action created successfully! Account automatically enabled for RSS monitoring.'
+        message = 'First action created successfully! You can now enable the account to start RSS monitoring.'
     else:
         message = 'Action created successfully'
     
