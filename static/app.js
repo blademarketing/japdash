@@ -64,6 +64,7 @@ class SocialMediaManager {
         
         // History events
         document.getElementById('applyFilters').addEventListener('click', () => this.loadHistory());
+        document.getElementById('refreshAllBtn').addEventListener('click', () => this.refreshAllPendingEntries());
         document.getElementById('historyPrevBtn').addEventListener('click', () => this.historyPrevPage());
         document.getElementById('historyNextBtn').addEventListener('click', () => this.historyNextPage());
         
@@ -1329,6 +1330,8 @@ class SocialMediaManager {
         if (tabName === 'history') {
             this.loadHistory();
             this.loadHistoryStats();
+            // Auto-refresh pending entries when loading history tab
+            setTimeout(() => this.autoRefreshPendingEntries(), 1000);
         } else if (tabName === 'logs') {
             this.loadLogs();
         } else if (tabName === 'settings') {
@@ -1576,6 +1579,93 @@ class SocialMediaManager {
         } catch (error) {
             console.error('Error refreshing status:', error);
             this.showNotification('Error refreshing status', 'error');
+        }
+    }
+
+    async autoRefreshPendingEntries() {
+        if (!this.historyData || !this.historyData.executions) return;
+        
+        const pendingEntries = this.historyData.executions.filter(execution => 
+            execution.status !== 'completed' && execution.status !== 'canceled'
+        );
+        
+        if (pendingEntries.length === 0) {
+            console.log('No pending entries to refresh');
+            return;
+        }
+        
+        console.log(`Auto-refreshing ${pendingEntries.length} pending entries...`);
+        
+        // Refresh each pending entry
+        for (const execution of pendingEntries) {
+            if (execution.jap_order_id) {
+                await this.refreshExecutionStatusSilent(execution.jap_order_id);
+                // Small delay between requests to avoid overwhelming the API
+                await new Promise(resolve => setTimeout(resolve, 200));
+            }
+        }
+        
+        // Reload history once after all refreshes
+        this.loadHistory();
+    }
+
+    async refreshAllPendingEntries() {
+        if (!this.historyData || !this.historyData.executions) {
+            this.showNotification('No history data loaded', 'error');
+            return;
+        }
+        
+        const pendingEntries = this.historyData.executions.filter(execution => 
+            execution.status !== 'completed' && execution.status !== 'canceled'
+        );
+        
+        if (pendingEntries.length === 0) {
+            this.showNotification('No pending entries to refresh', 'info');
+            return;
+        }
+        
+        const button = document.getElementById('refreshAllBtn');
+        const originalText = button.innerHTML;
+        button.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Refreshing...';
+        button.disabled = true;
+        
+        try {
+            console.log(`Refreshing ${pendingEntries.length} pending entries...`);
+            
+            let refreshCount = 0;
+            for (const execution of pendingEntries) {
+                if (execution.jap_order_id) {
+                    await this.refreshExecutionStatusSilent(execution.jap_order_id);
+                    refreshCount++;
+                    // Small delay between requests
+                    await new Promise(resolve => setTimeout(resolve, 200));
+                }
+            }
+            
+            // Reload history to show updated statuses
+            await this.loadHistory();
+            
+            this.showNotification(`Refreshed ${refreshCount} pending entries`, 'success');
+        } catch (error) {
+            console.error('Error during bulk refresh:', error);
+            this.showNotification('Error refreshing entries', 'error');
+        } finally {
+            button.innerHTML = originalText;
+            button.disabled = false;
+        }
+    }
+
+    async refreshExecutionStatusSilent(orderId) {
+        try {
+            const response = await fetch(`/api/history/${orderId}/refresh-status`, {
+                method: 'POST'
+            });
+            
+            if (!response.ok) {
+                console.warn(`Failed to refresh status for order ${orderId}`);
+            }
+        } catch (error) {
+            console.warn(`Error refreshing status for order ${orderId}:`, error);
         }
     }
 

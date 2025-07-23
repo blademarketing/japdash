@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Social Media Account Manager</title>
+    <title>Social Trigger Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
@@ -13,7 +13,8 @@
             <!-- Tab Navigation -->
             <div class="flex justify-between items-center mb-6">
                 <div>
-                    <h1 class="text-3xl font-bold text-gray-800 mb-2">Social Media Dashboard</h1>
+                    <h1 class="text-3xl font-bold text-gray-800 mb-2">Social Trigger</h1>
+                    <p class="text-gray-600 text-sm mb-4">Intelligent social media automation platform</p>
                     <div class="flex gap-4">
                         <button id="accountsTab" class="px-4 py-2 text-sm font-medium text-blue-600 border-b-2 border-blue-600">
                             <i class="fas fa-users mr-2"></i>Accounts
@@ -47,6 +48,10 @@
 
             <!-- Accounts Tab Content -->
             <div id="accountsContent">
+                <div class="mb-6">
+                    <h2 class="text-xl font-semibold text-gray-800 mb-2">Social Media Accounts</h2>
+                    <p class="text-gray-600 text-sm">Manage your connected social media accounts and configure automated post triggers</p>
+                </div>
                 <!-- Account Table -->
                 <div class="overflow-x-auto">
                     <table class="w-full table-auto">
@@ -81,6 +86,10 @@
 
             <!-- History Tab Content -->
             <div id="historyContent" class="hidden">
+                <div class="mb-6">
+                    <h2 class="text-xl font-semibold text-gray-800 mb-2">Execution History</h2>
+                    <p class="text-gray-600 text-sm">View and analyze your automated actions, orders, and campaign performance</p>
+                </div>
                 <!-- Filters -->
                 <div class="mb-6 p-4 bg-gray-50 rounded-lg">
                     <h3 class="font-semibold mb-3">Filters</h3>
@@ -115,9 +124,12 @@
                                 <option value="canceled">Canceled</option>
                             </select>
                         </div>
-                        <div class="flex items-end">
+                        <div class="flex items-end gap-2">
                             <button id="applyFilters" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md text-sm transition-colors">
                                 Apply Filters
+                            </button>
+                            <button id="refreshAllBtn" class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-md text-sm transition-colors">
+                                <i class="fas fa-sync mr-1"></i>Refresh All
                             </button>
                         </div>
                     </div>
@@ -177,6 +189,10 @@
 
             <!-- Logs Tab Content -->
             <div id="logsContent" class="hidden">
+                <div class="mb-6">
+                    <h2 class="text-xl font-semibold text-gray-800 mb-2">System Logs & Monitoring</h2>
+                    <p class="text-gray-600 text-sm">Monitor RSS polling activity, system events, and real-time application logs</p>
+                </div>
                 <!-- RSS Service Status -->
                 <div class="mb-6 p-4 bg-blue-50 rounded-lg border">
                     <div class="flex justify-between items-center">
@@ -227,6 +243,10 @@
 
             <!-- Settings Tab Content -->
             <div id="settingsContent" class="hidden">
+                <div class="mb-6">
+                    <h2 class="text-xl font-semibold text-gray-800 mb-2">System Configuration</h2>
+                    <p class="text-gray-600 text-sm">Configure API keys, system settings, and security preferences</p>
+                </div>
                 <!-- API Configuration -->
                 <form id="settingsForm">
                 <div class="mb-8 p-6 bg-white rounded-lg border">
