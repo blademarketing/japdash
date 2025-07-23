@@ -10,6 +10,7 @@ from logging.handlers import RotatingFileHandler
 from jap_client import JAPClient
 from rss_client import RSSAppClient
 from rss_poller import RSSPoller
+from llm_client import FlowiseClient
 
 # Load environment variables from .env file
 load_dotenv()
@@ -58,6 +59,13 @@ if not RSS_API_SECRET:
 jap_client = JAPClient(JAP_API_KEY)
 rss_client = RSSAppClient(RSS_API_KEY, RSS_API_SECRET)
 rss_poller = RSSPoller(DATABASE, rss_client, jap_client, log_console)
+
+# Initialize LLM client for testing
+llm_client = FlowiseClient(
+    endpoint_url="https://flowise.electric-marinade.com/api/v1/prediction/f474d703-0582-4170-a5e1-22d49c9472cd",
+    api_key="_iutUPVRnWyGKyoZfj1t0WIdLMZCcvAF8ONsBy3LhUU",
+    log_console_func=log_console
+)
 
 def get_db_connection():
     conn = sqlite3.connect(DATABASE)
@@ -1539,6 +1547,50 @@ def test_api_keys():
             'error': None if success else 'One or more API keys failed validation'
         })
         
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/test/llm', methods=['POST'])
+def test_llm_generation():
+    """Test LLM comment generation"""
+    try:
+        data = request.get_json()
+        
+        # Default test parameters
+        post_content = data.get('post_content', 'Just posted a beautiful sunset photo! 🌅')
+        comment_count = data.get('comment_count', 3)
+        custom_input = data.get('custom_input', 'Be enthusiastic and engaging, ask questions about the photo')
+        use_hashtags = data.get('use_hashtags', False)
+        use_emojis = data.get('use_emojis', True)
+        
+        # Generate comments using LLM
+        result = llm_client.generate_comments(
+            post_content=post_content,
+            comment_count=comment_count,
+            custom_input=custom_input,
+            use_hashtags=use_hashtags,
+            use_emojis=use_emojis
+        )
+        
+        if result['success']:
+            return jsonify({
+                'success': True,
+                'test_data': {
+                    'post_content': post_content,
+                    'comment_count': comment_count,
+                    'custom_input': custom_input,
+                    'use_hashtags': use_hashtags,
+                    'use_emojis': use_emojis
+                },
+                'generated_comments': result['comments'],
+                'metadata': result.get('metadata', {})
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': result['error']
+            }), 400
+            
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

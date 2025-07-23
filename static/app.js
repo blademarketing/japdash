@@ -574,15 +574,7 @@ class SocialMediaManager {
 
         // Additional parameters based on service type
         if (service.name.toLowerCase().includes('comment')) {
-            const commentsDiv = document.createElement('div');
-            commentsDiv.innerHTML = `
-                <label class="block text-sm font-medium text-gray-700 mb-2">Custom Comments</label>
-                <textarea id="param_custom_comments" rows="4" 
-                          placeholder="Enter custom comments (one per line)"
-                          class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
-                <p class="text-xs text-gray-500 mt-1">Leave empty for random comments</p>
-            `;
-            container.appendChild(commentsDiv);
+            this.generateCommentParameters(container);
         }
 
         // Trigger configuration info
@@ -598,6 +590,81 @@ class SocialMediaManager {
 
     clearDynamicParameters() {
         document.getElementById('dynamicParameters').innerHTML = '';
+    }
+
+    generateCommentParameters(container) {
+        // LLM Comment Generation Section
+        const llmSection = document.createElement('div');
+        llmSection.className = 'border-t pt-4 mt-4';
+        llmSection.innerHTML = `
+            <div class="flex items-center gap-2 mb-4">
+                <input type="checkbox" id="param_use_llm_generation" class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                <label for="param_use_llm_generation" class="text-sm font-medium text-gray-700">
+                    <i class="fas fa-robot text-blue-500 mr-1"></i>
+                    Use AI Comment Generation
+                </label>
+            </div>
+            
+            <div id="llm-options" class="space-y-4 hidden">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Comment Generation Instructions</label>
+                    <textarea id="param_comment_directives" rows="3" 
+                              placeholder="e.g., Be enthusiastic and supportive, ask engaging questions, reference the content meaningfully"
+                              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+                    <p class="text-xs text-gray-500 mt-1">Describe how the AI should generate comments for new posts</p>
+                </div>
+                
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Number of Comments</label>
+                        <input type="number" id="param_comment_count" min="1" max="100" value="5"
+                               class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <p class="text-xs text-gray-500 mt-1">1-100 comments</p>
+                    </div>
+                    <div class="space-y-2">
+                        <label class="block text-sm font-medium text-gray-700">Formatting Options</label>
+                        <div class="flex items-center gap-2">
+                            <input type="checkbox" id="param_use_hashtags" class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                            <label for="param_use_hashtags" class="text-sm text-gray-700">Include Hashtags</label>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <input type="checkbox" id="param_use_emojis" class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded" checked>
+                            <label for="param_use_emojis" class="text-sm text-gray-700">Include Emojis</label>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="p-3 bg-purple-50 rounded-lg text-sm">
+                    <i class="fas fa-magic text-purple-600 mr-2"></i>
+                    <span class="text-purple-800">AI will generate unique comments for each new post using the post content as context</span>
+                </div>
+            </div>
+            
+            <div id="manual-comments" class="space-y-2">
+                <label class="block text-sm font-medium text-gray-700 mb-2">Manual Comments</label>
+                <textarea id="param_custom_comments" rows="4" 
+                          placeholder="Enter custom comments (one per line)"
+                          class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+                <p class="text-xs text-gray-500 mt-1">Leave empty for random comments</p>
+            </div>
+        `;
+        
+        container.appendChild(llmSection);
+        
+        // Add toggle functionality
+        const llmCheckbox = llmSection.querySelector('#param_use_llm_generation');
+        const llmOptions = llmSection.querySelector('#llm-options');
+        const manualComments = llmSection.querySelector('#manual-comments');
+        
+        llmCheckbox.addEventListener('change', () => {
+            if (llmCheckbox.checked) {
+                llmOptions.classList.remove('hidden');
+                manualComments.classList.add('hidden');
+            } else {
+                llmOptions.classList.add('hidden');
+                manualComments.classList.remove('hidden');
+            }
+        });
     }
 
     onServiceSearch(e) {
@@ -696,10 +763,30 @@ class SocialMediaManager {
             quantity: parseInt(document.getElementById('param_quantity').value),
         };
 
-        // Add optional parameters
-        const customComments = document.getElementById('param_custom_comments');
-        if (customComments && customComments.value.trim()) {
-            parameters.custom_comments = customComments.value.trim();
+        // Check if LLM generation is enabled (only for comment services)
+        const llmCheckbox = document.getElementById('param_use_llm_generation');
+        if (llmCheckbox && llmCheckbox.checked) {
+            // LLM parameters
+            parameters.use_llm_generation = true;
+            parameters.comment_directives = document.getElementById('param_comment_directives').value.trim();
+            parameters.comment_count = parseInt(document.getElementById('param_comment_count').value) || 5;
+            parameters.use_hashtags = document.getElementById('param_use_hashtags').checked;
+            parameters.use_emojis = document.getElementById('param_use_emojis').checked;
+            
+            // Validate LLM parameters
+            if (!parameters.comment_directives) {
+                this.showNotification('Please provide comment generation instructions when using AI generation', 'error');
+                submitButton.disabled = false;
+                submitButton.innerHTML = originalText;
+                submitButton.classList.remove('opacity-75', 'cursor-not-allowed');
+                return;
+            }
+        } else {
+            // Manual comments
+            const customComments = document.getElementById('param_custom_comments');
+            if (customComments && customComments.value.trim()) {
+                parameters.custom_comments = customComments.value.trim();
+            }
         }
 
         const actionData = {
@@ -754,28 +841,39 @@ class SocialMediaManager {
                 return;
             }
 
-            container.innerHTML = actions.map(action => `
-                <div class="flex items-center justify-between p-3 bg-white border rounded-lg">
-                    <div class="flex-1">
-                        <div class="flex items-center gap-2">
-                            <span class="font-medium">${this.formatActionType(action.action_type)}</span>
-                            <span class="text-sm text-gray-500">•</span>
-                            <span class="text-sm text-gray-600">${action.service_name}</span>
+            container.innerHTML = actions.map(action => {
+                const isLLMEnabled = action.parameters.use_llm_generation;
+                const llmInfo = isLLMEnabled ? `
+                    <div class="text-xs text-purple-600 mt-1">
+                        <i class="fas fa-robot mr-1"></i>AI Generation: ${action.parameters.comment_count || 5} comments
+                    </div>
+                ` : '';
+                
+                return `
+                    <div class="flex items-center justify-between p-3 bg-white border rounded-lg">
+                        <div class="flex-1">
+                            <div class="flex items-center gap-2">
+                                <span class="font-medium">${this.formatActionType(action.action_type)}</span>
+                                <span class="text-sm text-gray-500">•</span>
+                                <span class="text-sm text-gray-600">${action.service_name}</span>
+                                ${isLLMEnabled ? '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800"><i class="fas fa-robot mr-1"></i>AI</span>' : ''}
+                            </div>
+                            <div class="text-xs text-gray-500 mt-1">
+                                Quantity: ${action.parameters.quantity} | Triggered: ${action.order_count || 0} times | Completed: ${action.completed_orders || 0}
+                            </div>
+                            <div class="text-xs text-blue-600 mt-1">
+                                <i class="fas fa-rss mr-1"></i>RSS Trigger Ready
+                            </div>
+                            ${llmInfo}
                         </div>
-                        <div class="text-xs text-gray-500 mt-1">
-                            Quantity: ${action.parameters.quantity} | Triggered: ${action.order_count || 0} times | Completed: ${action.completed_orders || 0}
-                        </div>
-                        <div class="text-xs text-blue-600 mt-1">
-                            <i class="fas fa-rss mr-1"></i>RSS Trigger Ready
+                        <div class="flex gap-2">
+                            <button onclick="app.deleteAction(${action.id})" class="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-xs">
+                                <i class="fas fa-trash"></i>
+                            </button>
                         </div>
                     </div>
-                    <div class="flex gap-2">
-                        <button onclick="app.deleteAction(${action.id})" class="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-xs">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    </div>
-                </div>
-            `).join('');
+                `;
+            }).join('');
         } catch (error) {
             console.error('Error loading actions:', error);
         }
