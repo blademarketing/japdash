@@ -360,11 +360,20 @@ class RSSPoller:
                     self.log_console('EXEC', f'Action already executed for this post - skipping duplicate', 'skipped')
                     return {'success': False, 'error': 'Duplicate execution prevented', 'skipped': True}
             
+            # Determine quantity - use random value if range is specified
+            quantity = parameters.get('quantity', 100)
+            if parameters.get('use_range', False):
+                import random
+                min_qty = parameters.get('quantity_min', quantity)
+                max_qty = parameters.get('quantity_max', quantity)
+                quantity = random.randint(min_qty, max_qty)
+                self.log_console('EXEC', f'Using random quantity {quantity} from range [{min_qty}, {max_qty}]', 'info')
+            
             # Check if this is a comment service with LLM generation enabled
             custom_comments = parameters.get('custom_comments')
             if self._is_comment_service_with_llm(action, parameters):
-                # Generate comments using LLM
-                llm_result = self._generate_comments_for_post(action, parameters, post, account)
+                # Generate comments using LLM with the determined quantity
+                llm_result = self._generate_comments_for_post(action, parameters, post, account, quantity)
                 
                 if llm_result['success']:
                     # Use generated comments
@@ -380,7 +389,7 @@ class RSSPoller:
             order_response = self.jap_client.create_order(
                 service_id=action['jap_service_id'],
                 link=target_url,
-                quantity=parameters.get('quantity', 100),
+                quantity=quantity,
                 custom_comments=custom_comments
             )
             
@@ -393,7 +402,7 @@ class RSSPoller:
                 # Try to get service rate from JAP client cache
                 service_info = self.jap_client.get_service_details(action['jap_service_id'])
                 if service_info and 'rate' in service_info:
-                    estimated_cost = (parameters.get('quantity', 100) / 1000) * float(service_info['rate'])
+                    estimated_cost = (quantity / 1000) * float(service_info['rate'])
             except:
                 pass  # Use 0 if can't calculate
             
@@ -423,7 +432,7 @@ class RSSPoller:
                 target_url,
                 action['jap_service_id'],
                 action['service_name'],
-                parameters.get('quantity', 100),
+                quantity,
                 estimated_cost,
                 'pending',
                 account['id'],
@@ -470,7 +479,7 @@ class RSSPoller:
         return is_comment_service and llm_enabled and has_directives
     
     def _generate_comments_for_post(self, action: Dict[str, Any], parameters: Dict[str, Any], 
-                                  post: Dict[str, Any], account: Dict[str, Any]) -> Dict[str, Any]:
+                                  post: Dict[str, Any], account: Dict[str, Any], quantity: int) -> Dict[str, Any]:
         """
         Generate comments for a post using LLM
         
@@ -494,13 +503,11 @@ class RSSPoller:
                 post_content = f"New post from {account['username']} on {account['platform']}"
             
             # Get LLM parameters
-            comment_count = parameters.get('comment_count', 5)
+            # Use the quantity parameter for comment count
+            comment_count = max(1, min(quantity, 100))  # Ensure within bounds
             comment_directives = parameters.get('comment_directives', 'Generate engaging and relevant comments')
             use_hashtags = parameters.get('use_hashtags', False)
             use_emojis = parameters.get('use_emojis', True)
-            
-            # Ensure comment count is within bounds
-            comment_count = max(1, min(comment_count, 100))
             
             # Generate comments using Flowise
             result = self.llm_client.generate_comments(

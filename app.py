@@ -738,12 +738,32 @@ def quick_execute_action():
         if not all(field in data for field in required_fields):
             return jsonify({'error': 'Missing required fields'}), 400
         
-        # Create JAP order directly
+        # Check if LLM generation is enabled for comment services
+        custom_comments = data.get('custom_comments')
+        if data.get('use_llm_generation') and 'comment' in data['service_name'].lower():
+            # Generate comments using LLM
+            log_console('LLM', f'Quick Execute: Generating {data["quantity"]} AI comments', 'pending')
+            
+            llm_result = llm_client.generate_comments(
+                post_content=data['link'],  # Using URL as post content for quick execute
+                comment_count=data['quantity'],  # Use quantity for comment count
+                custom_input=data.get('comment_directives', 'Generate engaging comments'),
+                use_hashtags=data.get('use_hashtags', False),
+                use_emojis=data.get('use_emojis', False)
+            )
+            
+            if llm_result['success']:
+                custom_comments = '\n'.join(llm_result['comments'])
+                log_console('LLM', f'Quick Execute: Generated {len(llm_result["comments"])} comments successfully', 'success')
+            else:
+                return jsonify({'error': f'AI comment generation failed: {llm_result["error"]}'}), 400
+        
+        # Create JAP order
         order_response = jap_client.create_order(
             service_id=data['service_id'],
             link=data['link'],
             quantity=data['quantity'],
-            custom_comments=data.get('custom_comments')
+            custom_comments=custom_comments
         )
         
         if 'error' in order_response:
@@ -770,8 +790,13 @@ def quick_execute_action():
             estimated_cost,
             'pending',
             json.dumps({
-                'custom_comments': data.get('custom_comments'),
-                'service_rate': data.get('service_rate', 0)
+                'custom_comments': custom_comments,  # Using the potentially AI-generated comments
+                'service_rate': data.get('service_rate', 0),
+                'use_llm_generation': data.get('use_llm_generation', False),
+                'comment_directives': data.get('comment_directives'),
+                'comment_count': data.get('comment_count'),
+                'use_hashtags': data.get('use_hashtags'),
+                'use_emojis': data.get('use_emojis')
             }),
             'Quick Execute'  # Default display name for instant executions
         ))
