@@ -14,6 +14,12 @@ class SocialMediaManager {
             offset: 0,
             limit: 20
         };
+        this.tags = [];
+        this.selectedTags = [];
+        this.filteredTags = [];
+        this.mainFilteredTags = [];
+        this.tagFilterLogic = 'or'; // or 'and'
+        this.copyActionsSource = null;
         this.init();
     }
 
@@ -21,6 +27,7 @@ class SocialMediaManager {
         this.bindEvents();
         this.loadAccounts();
         this.loadJAPBalance();
+        this.loadTags();
     }
 
     bindEvents() {
@@ -29,6 +36,11 @@ class SocialMediaManager {
         document.getElementById('closeModal').addEventListener('click', () => this.closeModal());
         document.getElementById('cancelBtn').addEventListener('click', () => this.closeModal());
         document.getElementById('accountForm').addEventListener('submit', (e) => this.handleSubmit(e));
+        
+        // Tag input events
+        document.getElementById('tagInput').addEventListener('input', (e) => this.onTagInput(e));
+        document.getElementById('tagInput').addEventListener('keydown', (e) => this.onTagKeydown(e));
+        document.getElementById('tagInput').addEventListener('blur', (e) => this.hideSuggestionsDelayed(e));
         
         // Action modal events
         document.getElementById('closeActionModal').addEventListener('click', () => this.closeActionModal());
@@ -84,6 +96,9 @@ class SocialMediaManager {
         document.getElementById('testApiKeys').addEventListener('click', () => this.testApiKeys());
         document.getElementById('saveSettings').addEventListener('click', () => this.saveSettings());
         
+        // Tag filter events
+        document.addEventListener('click', (e) => this.handleDocumentClick(e));
+        
         // Close modals when clicking outside
         document.getElementById('modal').addEventListener('click', (e) => {
             if (e.target.id === 'modal') this.closeModal();
@@ -127,11 +142,94 @@ class SocialMediaManager {
         }
     }
 
+    async loadTags() {
+        try {
+            const response = await fetch('/api/tags');
+            this.tags = await response.json();
+            this.updateTagFilter();
+        } catch (error) {
+            console.error('Error loading tags:', error);
+        }
+    }
+
+    updateTagFilter() {
+        const tagFilterContainer = document.getElementById('tagFilterContainer');
+        const mainTagList = document.getElementById('mainTagList');
+        
+        if (this.tags.length > 0) {
+            tagFilterContainer.classList.remove('hidden');
+            
+            // Populate tag checkboxes
+            mainTagList.innerHTML = this.tags.map(tag => `
+                <label class="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded">
+                    <input type="checkbox" value="${tag.id}" onchange="app.onMainTagFilterChange()" 
+                           class="main-tag-checkbox" ${this.mainFilteredTags.includes(tag.id) ? 'checked' : ''}>
+                    <span class="flex-1">${tag.name}</span>
+                    <span class="w-4 h-4 rounded-full" style="background-color: ${tag.color}"></span>
+                </label>
+            `).join('');
+        } else {
+            tagFilterContainer.classList.add('hidden');
+        }
+    }
+
+    toggleTagFilterDropdown() {
+        const dropdown = document.getElementById('tagFilterDropdown');
+        dropdown.classList.toggle('hidden');
+    }
+
+    handleDocumentClick(e) {
+        // Close tag filter dropdown when clicking outside
+        const dropdown = document.getElementById('tagFilterDropdown');
+        const button = document.getElementById('tagFilterButton');
+        
+        if (!dropdown.contains(e.target) && !button.contains(e.target)) {
+            dropdown.classList.add('hidden');
+        }
+    }
+
+    onMainTagFilterChange() {
+        // Get selected tags
+        this.mainFilteredTags = Array.from(document.querySelectorAll('.main-tag-checkbox:checked'))
+            .map(cb => parseInt(cb.value));
+        
+        // Update button text
+        const tagFilterText = document.getElementById('tagFilterText');
+        if (this.mainFilteredTags.length === 0) {
+            tagFilterText.textContent = 'All Accounts';
+        } else if (this.mainFilteredTags.length === 1) {
+            const tag = this.tags.find(t => t.id === this.mainFilteredTags[0]);
+            tagFilterText.textContent = tag ? tag.name : 'All Accounts';
+        } else {
+            tagFilterText.textContent = `${this.mainFilteredTags.length} tags selected`;
+        }
+        
+        // Re-render table with filters
+        this.renderTable();
+    }
+
+    clearMainTagFilters() {
+        document.querySelectorAll('.main-tag-checkbox').forEach(cb => cb.checked = false);
+        this.mainFilteredTags = [];
+        document.getElementById('tagFilterText').textContent = 'All Accounts';
+        this.renderTable();
+    }
+
     renderTable() {
         const tbody = document.getElementById('accountsTable');
         const emptyState = document.getElementById('emptyState');
         
-        if (this.accounts.length === 0) {
+        // Filter accounts by tags
+        let filteredAccounts = this.accounts;
+        if (this.mainFilteredTags.length > 0) {
+            filteredAccounts = this.accounts.filter(account => {
+                if (!account.tags || account.tags.length === 0) return false;
+                // Show accounts that have ANY of the selected tags
+                return account.tags.some(tag => this.mainFilteredTags.includes(tag.id));
+            });
+        }
+        
+        if (filteredAccounts.length === 0) {
             tbody.innerHTML = '';
             emptyState.classList.remove('hidden');
             return;
@@ -139,7 +237,7 @@ class SocialMediaManager {
         
         emptyState.classList.add('hidden');
         
-        tbody.innerHTML = this.accounts.map(account => `
+        tbody.innerHTML = filteredAccounts.map(account => `
             <tr class="hover:bg-gray-50">
                 <td class="px-4 py-3">
                     <div class="flex items-center gap-2">
@@ -147,7 +245,19 @@ class SocialMediaManager {
                         <span class="font-medium">${account.platform}</span>
                     </div>
                 </td>
-                <td class="px-4 py-3 text-gray-700">${account.username}</td>
+                <td class="px-4 py-3">
+                    <div>
+                        <div class="text-gray-700">${account.username}</div>
+                        <div class="flex flex-wrap gap-1 mt-1">
+                            ${account.tags && account.tags.map(tag => `
+                                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium" 
+                                      style="background-color: ${tag.color}20; color: ${tag.color};">
+                                    ${tag.name}
+                                </span>
+                            `).join('')}
+                        </div>
+                    </div>
+                </td>
                 <td class="px-4 py-3 text-gray-700">${account.display_name || '-'}</td>
                 <td class="px-4 py-3">
                     ${account.url ? `<a href="${account.url}" target="_blank" class="text-blue-500 hover:text-blue-700 underline">View Profile</a>` : '-'}
@@ -166,10 +276,13 @@ class SocialMediaManager {
                 </td>
                 <td class="px-4 py-3">
                     <div class="flex gap-2">
-                        <button onclick="app.editAccount(${account.id})" class="text-blue-500 hover:text-blue-700 p-1">
+                        <button onclick="app.editAccount(${account.id})" class="text-blue-500 hover:text-blue-700 p-1" title="Edit">
                             <i class="fas fa-edit"></i>
                         </button>
-                        <button onclick="app.deleteAccount(${account.id})" class="text-red-500 hover:text-red-700 p-1">
+                        <button onclick="app.openCopyActionsModal(${account.id})" class="text-green-500 hover:text-green-700 p-1" title="Copy Actions">
+                            <i class="fas fa-copy"></i>
+                        </button>
+                        <button onclick="app.deleteAccount(${account.id})" class="text-red-500 hover:text-red-700 p-1" title="Delete">
                             <i class="fas fa-trash"></i>
                         </button>
                     </div>
@@ -334,6 +447,11 @@ class SocialMediaManager {
         const modalTitle = document.getElementById('modalTitle');
         const form = document.getElementById('accountForm');
         
+        // Reset tag UI
+        this.selectedTags = [];
+        document.getElementById('selectedTags').innerHTML = '';
+        document.getElementById('tagInput').value = '';
+        
         if (account) {
             modalTitle.textContent = 'Edit Account';
             document.getElementById('accountId').value = account.id;
@@ -342,6 +460,12 @@ class SocialMediaManager {
             document.getElementById('displayName').value = account.display_name || '';
             document.getElementById('url').value = account.url || '';
             this.currentEditId = account.id;
+            
+            // Load existing tags
+            if (account.tags) {
+                this.selectedTags = account.tags.map(t => ({ id: t.id, name: t.name, color: t.color }));
+                this.renderSelectedTags();
+            }
         } else {
             modalTitle.textContent = 'Add Account';
             form.reset();
@@ -395,8 +519,25 @@ class SocialMediaManager {
             }
 
             if (response.ok) {
+                const accountData = await response.json();
+                
+                // Add tags if this is a new account
+                if (!this.currentEditId && this.selectedTags.length > 0) {
+                    const accountId = accountData.account_id;
+                    
+                    // Add each tag to the account
+                    for (const tag of this.selectedTags) {
+                        await fetch(`/api/accounts/${accountId}/tags`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ tag_id: tag.id })
+                        });
+                    }
+                }
+                
                 this.closeModal();
                 this.loadAccounts();
+                this.loadTags(); // Refresh tags in case new ones were created
                 this.showNotification(this.currentEditId ? 'Account updated successfully!' : 'Account added successfully!', 'success');
             } else {
                 const error = await response.json();
@@ -1919,6 +2060,440 @@ class SocialMediaManager {
             console.error('Error deleting account:', error);
             this.showNotification('An error occurred while deleting the account', 'error');
         }
+    }
+
+    async openCopyActionsModal(sourceAccountId) {
+        const sourceAccount = this.accounts.find(a => a.id === sourceAccountId);
+        if (!sourceAccount) return;
+        
+        // Check if account has actions
+        if (sourceAccount.action_count === 0) {
+            this.showNotification('This account has no actions to copy', 'error');
+            return;
+        }
+        
+        // Get actions for this account
+        try {
+            const response = await fetch(`/api/accounts/${sourceAccountId}/actions`);
+            const actions = await response.json();
+            
+            if (!response.ok || actions.length === 0) {
+                this.showNotification('No actions found for this account', 'error');
+                return;
+            }
+            
+            this.copyActionsSource = {
+                account: sourceAccount,
+                actions: actions
+            };
+            
+            this.showCopyActionsDialog();
+        } catch (error) {
+            console.error('Error loading account actions:', error);
+            this.showNotification('Error loading account actions', 'error');
+        }
+    }
+
+    showCopyActionsDialog() {
+        const modal = document.createElement('div');
+        modal.id = 'copyActionsModal';
+        modal.className = 'fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center';
+        
+        const source = this.copyActionsSource;
+        // Filter by same platform only
+        const targetAccounts = this.accounts.filter(a => 
+            a.id !== source.account.id && 
+            a.platform === source.account.platform
+        );
+        
+        modal.innerHTML = `
+            <div class="bg-white rounded-lg p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+                <h2 class="text-2xl font-bold mb-4">Copy Actions</h2>
+                
+                <div class="mb-6">
+                    <h3 class="text-lg font-semibold mb-2">Source Account</h3>
+                    <div class="bg-gray-100 p-4 rounded">
+                        <div class="flex items-center gap-2 mb-2">
+                            <i class="${this.getPlatformIcon(source.account.platform)} text-lg"></i>
+                            <span class="font-medium">${source.account.platform}</span>
+                            <span class="text-gray-700">@${source.account.username}</span>
+                        </div>
+                        <div class="text-sm text-gray-600">
+                            ${source.actions.length} action${source.actions.length > 1 ? 's' : ''} to copy:
+                            <ul class="list-disc list-inside mt-1">
+                                ${source.actions.map(action => `
+                                    <li>${action.service_name} (${action.action_type})</li>
+                                `).join('')}
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="mb-6">
+                    <h3 class="text-lg font-semibold mb-2">Select Target ${source.account.platform} Accounts</h3>
+                    
+                    ${targetAccounts.length === 0 ? 
+                        `<div class="bg-yellow-50 border border-yellow-200 rounded p-4 mb-4">
+                            <i class="fas fa-exclamation-triangle text-yellow-600 mr-2"></i>
+                            <span class="text-yellow-800">No other ${source.account.platform} accounts found. Actions can only be copied to accounts on the same platform.</span>
+                        </div>` : ''
+                    }
+                    
+                    ${this.tags.length > 0 && targetAccounts.length > 0 ? `
+                        <div class="mb-4">
+                            <div class="flex items-center justify-between mb-2">
+                                <label class="text-sm text-gray-600">Filter by tags:</label>
+                                <div class="flex items-center gap-4">
+                                    <label class="flex items-center text-sm">
+                                        <input type="radio" name="tagLogic" value="or" checked onchange="app.onTagLogicChange('or')" class="mr-1">
+                                        <span class="text-gray-600">Match ANY tag (OR)</span>
+                                    </label>
+                                    <label class="flex items-center text-sm">
+                                        <input type="radio" name="tagLogic" value="and" onchange="app.onTagLogicChange('and')" class="mr-1">
+                                        <span class="text-gray-600">Match ALL tags (AND)</span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="flex flex-wrap gap-2">
+                                ${this.tags.map(tag => `
+                                    <button onclick="app.toggleTagFilter('${tag.id}')" 
+                                            data-tag-id="${tag.id}"
+                                            class="tag-filter-btn px-3 py-1 rounded-full text-sm border transition-all"
+                                            style="border-color: ${tag.color}; color: ${tag.color};">
+                                        <i class="fas fa-check mr-1 hidden"></i>
+                                        ${tag.name}
+                                    </button>
+                                `).join('')}
+                                <button onclick="app.clearTagFilters()" 
+                                        class="px-3 py-1 rounded-full text-sm border border-gray-300 text-gray-600 hover:bg-gray-100">
+                                    <i class="fas fa-times mr-1"></i>
+                                    Clear all
+                                </button>
+                            </div>
+                            <div id="tagFilterStatus" class="text-xs text-gray-500 mt-1"></div>
+                        </div>
+                    ` : ''}
+                    
+                    <div class="mb-3 flex gap-2">
+                        <button onclick="app.selectAllTargets()" class="text-sm text-blue-500 hover:text-blue-700">
+                            Select All
+                        </button>
+                        <span class="text-gray-400">|</span>
+                        <button onclick="app.selectNoneTargets()" class="text-sm text-blue-500 hover:text-blue-700">
+                            Select None
+                        </button>
+                    </div>
+                    
+                    <div class="max-h-64 overflow-y-auto border rounded p-2">
+                        ${targetAccounts.length > 0 ? targetAccounts.map(account => `
+                            <label class="flex items-center p-2 hover:bg-gray-50 cursor-pointer target-account-item"
+                                   data-account-id="${account.id}"
+                                   data-tags="${account.tags ? account.tags.map(t => t.id).join(',') : ''}">
+                                <input type="checkbox" value="${account.id}" class="target-account-checkbox mr-3">
+                                <div class="flex-1">
+                                    <div class="flex items-center gap-2">
+                                        <i class="${this.getPlatformIcon(account.platform)} text-sm"></i>
+                                        <span class="font-medium text-sm">${account.platform}</span>
+                                        <span class="text-gray-700">@${account.username}</span>
+                                    </div>
+                                    ${account.tags && account.tags.length > 0 ? `
+                                        <div class="flex flex-wrap gap-1 mt-1">
+                                            ${account.tags.map(tag => `
+                                                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs"
+                                                      style="background-color: ${tag.color}20; color: ${tag.color};">
+                                                    ${tag.name}
+                                                </span>
+                                            `).join('')}
+                                        </div>
+                                    ` : ''}
+                                </div>
+                                <span class="text-xs text-gray-500 ml-2">
+                                    ${account.action_count} existing action${account.action_count !== 1 ? 's' : ''}
+                                </span>
+                            </label>
+                        `).join('') : '<p class="text-gray-500 text-center py-4">No other accounts available</p>'}
+                    </div>
+                </div>
+                
+                <div class="flex justify-end gap-3">
+                    <button onclick="app.closeCopyActionsModal()" 
+                            class="px-4 py-2 border border-gray-300 rounded hover:bg-gray-50">
+                        Cancel
+                    </button>
+                    <button onclick="app.executeCopyActions()" 
+                            class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">
+                        Copy Actions
+                    </button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+    }
+
+    toggleTagFilter(tagId) {
+        const btn = document.querySelector(`[data-tag-id="${tagId}"]`);
+        const checkIcon = btn.querySelector('i');
+        const isActive = btn.classList.contains('active-filter');
+        
+        if (isActive) {
+            btn.classList.remove('active-filter');
+            btn.style.backgroundColor = 'transparent';
+            btn.style.color = btn.style.borderColor;
+            checkIcon.classList.add('hidden');
+            this.filteredTags = this.filteredTags.filter(id => id !== tagId);
+        } else {
+            btn.classList.add('active-filter');
+            btn.style.backgroundColor = btn.style.borderColor;
+            btn.style.color = 'white';
+            checkIcon.classList.remove('hidden');
+            this.filteredTags.push(tagId);
+        }
+        
+        this.updateTagFilterStatus();
+        this.filterTargetAccounts();
+    }
+
+    onTagLogicChange(logic) {
+        this.tagFilterLogic = logic;
+        this.updateTagFilterStatus();
+        this.filterTargetAccounts();
+    }
+
+    updateTagFilterStatus() {
+        const statusDiv = document.getElementById('tagFilterStatus');
+        if (!statusDiv) return;
+        
+        if (this.filteredTags.length === 0) {
+            statusDiv.textContent = '';
+        } else {
+            const selectedTagNames = this.filteredTags.map(id => {
+                const tag = this.tags.find(t => t.id === parseInt(id));
+                return tag ? tag.name : '';
+            }).filter(n => n);
+            
+            if (this.tagFilterLogic === 'or') {
+                statusDiv.textContent = `Showing accounts with ANY of these tags: ${selectedTagNames.join(', ')}`;
+            } else {
+                statusDiv.textContent = `Showing accounts with ALL of these tags: ${selectedTagNames.join(', ')}`;
+            }
+        }
+    }
+
+    clearTagFilters() {
+        document.querySelectorAll('.tag-filter-btn').forEach(btn => {
+            btn.classList.remove('active-filter');
+            btn.style.backgroundColor = 'transparent';
+            btn.style.color = btn.style.borderColor;
+            const checkIcon = btn.querySelector('i');
+            if (checkIcon) checkIcon.classList.add('hidden');
+        });
+        this.filteredTags = [];
+        this.updateTagFilterStatus();
+        this.filterTargetAccounts();
+    }
+
+    filterTargetAccounts() {
+        const items = document.querySelectorAll('.target-account-item');
+        let visibleCount = 0;
+        
+        items.forEach(item => {
+            if (this.filteredTags.length === 0) {
+                item.style.display = 'flex';
+                visibleCount++;
+            } else {
+                const accountTags = item.dataset.tags.split(',').filter(t => t);
+                let shouldShow = false;
+                
+                if (this.tagFilterLogic === 'or') {
+                    // OR logic - show if account has ANY of the selected tags
+                    shouldShow = this.filteredTags.some(tagId => accountTags.includes(tagId));
+                } else {
+                    // AND logic - show if account has ALL of the selected tags
+                    shouldShow = this.filteredTags.every(tagId => accountTags.includes(tagId));
+                }
+                
+                item.style.display = shouldShow ? 'flex' : 'none';
+                if (shouldShow) visibleCount++;
+            }
+        });
+        
+        // Update visible count in status
+        const statusDiv = document.getElementById('tagFilterStatus');
+        if (statusDiv && this.filteredTags.length > 0) {
+            statusDiv.textContent += ` (${visibleCount} accounts)`;
+        }
+    }
+
+    selectAllTargets() {
+        document.querySelectorAll('.target-account-item:not([style*="display: none"]) .target-account-checkbox')
+            .forEach(cb => cb.checked = true);
+    }
+
+    selectNoneTargets() {
+        document.querySelectorAll('.target-account-checkbox').forEach(cb => cb.checked = false);
+    }
+
+    closeCopyActionsModal() {
+        const modal = document.getElementById('copyActionsModal');
+        if (modal) {
+            modal.remove();
+        }
+        this.copyActionsSource = null;
+        this.filteredTags = [];
+        this.tagFilterLogic = 'or';
+    }
+
+    async executeCopyActions() {
+        const selectedIds = Array.from(document.querySelectorAll('.target-account-checkbox:checked'))
+            .map(cb => parseInt(cb.value));
+        
+        if (selectedIds.length === 0) {
+            this.showNotification('Please select at least one target account', 'error');
+            return;
+        }
+        
+        const btn = document.querySelector('button[onclick="app.executeCopyActions()"]');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Copying...';
+        
+        try {
+            const response = await fetch(`/api/accounts/${this.copyActionsSource.account.id}/copy-actions`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ target_account_ids: selectedIds })
+            });
+            
+            const result = await response.json();
+            
+            if (response.ok) {
+                this.showNotification(result.message, 'success');
+                this.closeCopyActionsModal();
+                this.loadAccounts(); // Refresh accounts to show updated action counts
+            } else {
+                this.showNotification(result.error || 'Failed to copy actions', 'error');
+            }
+        } catch (error) {
+            console.error('Error copying actions:', error);
+            this.showNotification('Error copying actions', 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = 'Copy Actions';
+        }
+    }
+
+    // Tag management methods
+    onTagInput(e) {
+        const query = e.target.value.toLowerCase().trim();
+        const suggestionsDiv = document.getElementById('tagSuggestions');
+        
+        if (query.length === 0) {
+            suggestionsDiv.classList.add('hidden');
+            return;
+        }
+        
+        // Filter tags that aren't already selected
+        const availableTags = this.tags.filter(tag => 
+            !this.selectedTags.some(st => st.id === tag.id) &&
+            tag.name.includes(query)
+        );
+        
+        // Show suggestions
+        if (availableTags.length > 0 || query.length > 0) {
+            suggestionsDiv.innerHTML = availableTags.map(tag => `
+                <div class="px-3 py-2 hover:bg-gray-100 cursor-pointer flex items-center justify-between"
+                     onclick="app.selectTag(${tag.id}, '${tag.name}', '${tag.color}')">
+                    <span>${tag.name}</span>
+                    <span class="w-4 h-4 rounded-full" style="background-color: ${tag.color}"></span>
+                </div>
+            `).join('');
+            
+            // Add create new option if no exact match
+            if (!this.tags.some(tag => tag.name === query)) {
+                suggestionsDiv.innerHTML += `
+                    <div class="px-3 py-2 hover:bg-gray-100 cursor-pointer border-t flex items-center"
+                         onclick="app.createAndSelectTag('${query}')">
+                        <i class="fas fa-plus mr-2 text-green-500"></i>
+                        <span>Create new tag "${query}"</span>
+                    </div>
+                `;
+            }
+            
+            suggestionsDiv.classList.remove('hidden');
+        } else {
+            suggestionsDiv.classList.add('hidden');
+        }
+    }
+
+    onTagKeydown(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            const query = e.target.value.toLowerCase().trim();
+            if (query) {
+                // Create new tag if it doesn't exist
+                if (!this.tags.some(tag => tag.name === query)) {
+                    this.createAndSelectTag(query);
+                }
+            }
+        }
+    }
+
+    hideSuggestionsDelayed(e) {
+        // Delay to allow clicking on suggestions
+        setTimeout(() => {
+            document.getElementById('tagSuggestions').classList.add('hidden');
+        }, 200);
+    }
+
+    selectTag(id, name, color) {
+        if (!this.selectedTags.some(tag => tag.id === id)) {
+            this.selectedTags.push({ id, name, color });
+            this.renderSelectedTags();
+            document.getElementById('tagInput').value = '';
+            document.getElementById('tagSuggestions').classList.add('hidden');
+        }
+    }
+
+    async createAndSelectTag(name) {
+        try {
+            const response = await fetch('/api/tags', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, color: this.getRandomColor() })
+            });
+            
+            if (response.ok) {
+                const newTag = await response.json();
+                this.tags.push(newTag);
+                this.selectTag(newTag.id, newTag.name, newTag.color);
+                this.updateTagFilter();
+            }
+        } catch (error) {
+            console.error('Error creating tag:', error);
+        }
+    }
+
+    removeSelectedTag(id) {
+        this.selectedTags = this.selectedTags.filter(tag => tag.id !== id);
+        this.renderSelectedTags();
+    }
+
+    renderSelectedTags() {
+        const container = document.getElementById('selectedTags');
+        container.innerHTML = this.selectedTags.map(tag => `
+            <span class="inline-flex items-center px-3 py-1 rounded-full text-sm"
+                  style="background-color: ${tag.color}20; color: ${tag.color};">
+                ${tag.name}
+                <button onclick="app.removeSelectedTag(${tag.id})" class="ml-2 hover:opacity-75">
+                    <i class="fas fa-times"></i>
+                </button>
+            </span>
+        `).join('');
+    }
+
+    getRandomColor() {
+        const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#14B8A6'];
+        return colors[Math.floor(Math.random() * colors.length)];
     }
 
     showNotification(message, type = 'info') {

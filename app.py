@@ -144,7 +144,70 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
+def check_and_apply_migrations():
+    """Check for pending migrations and apply them"""
+    conn = get_db_connection()
+    
+    # Create migrations tracking table
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            version TEXT PRIMARY KEY,
+            applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # Get applied migrations
+    applied = set(row['version'] for row in conn.execute('SELECT version FROM schema_migrations').fetchall())
+    
+    # Check if v2 migration is needed (tags tables)
+    if 'v2_add_tags' not in applied:
+        print("Applying migration v2_add_tags...")
+        try:
+            # Create tags table
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS tags (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    color TEXT DEFAULT '#6B7280',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            # Create account_tags junction table
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS account_tags (
+                    account_id INTEGER NOT NULL,
+                    tag_id INTEGER NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (account_id, tag_id),
+                    FOREIGN KEY (account_id) REFERENCES accounts (id) ON DELETE CASCADE,
+                    FOREIGN KEY (tag_id) REFERENCES tags (id) ON DELETE CASCADE
+                )
+            ''')
+            
+            # Create indexes
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(name)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_account_tags_account_id ON account_tags(account_id)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_account_tags_tag_id ON account_tags(tag_id)')
+            
+            # Mark migration as applied
+            conn.execute('INSERT INTO schema_migrations (version) VALUES (?)', ('v2_add_tags',))
+            conn.commit()
+            print("Migration v2_add_tags applied successfully!")
+            
+            # Log to console
+            log_console('SYSTEM', 'Database migration v2_add_tags applied (tags support)', 'success')
+        except Exception as e:
+            print(f"Error applying migration v2_add_tags: {e}")
+            conn.rollback()
+            raise
+    
+    conn.close()
+
 def init_db():
+    # Apply any pending migrations first
+    check_and_apply_migrations()
+    
     conn = get_db_connection()
     
     # Accounts table (create with original schema first)
@@ -305,6 +368,8 @@ def init_db():
         )
     ''')
     
+    # Tags tables are now created via migration system
+    
     conn.commit()
     conn.close()
 
@@ -347,14 +412,32 @@ def index():
 def get_accounts():
     conn = get_db_connection()
     accounts = conn.execute('''
-        SELECT a.*, COUNT(ac.id) as action_count
+        SELECT a.*, COUNT(DISTINCT ac.id) as action_count
         FROM accounts a
         LEFT JOIN actions ac ON a.id = ac.account_id AND ac.is_active = 1
         GROUP BY a.id
         ORDER BY a.created_at DESC
     ''').fetchall()
+    
+    # Get tags for each account
+    account_list = []
+    for account in accounts:
+        account_dict = dict(account)
+        
+        # Get tags for this account
+        tags = conn.execute('''
+            SELECT t.id, t.name, t.color
+            FROM tags t
+            JOIN account_tags at ON t.id = at.tag_id
+            WHERE at.account_id = ?
+            ORDER BY t.name
+        ''', (account['id'],)).fetchall()
+        
+        account_dict['tags'] = [dict(tag) for tag in tags]
+        account_list.append(account_dict)
+    
     conn.close()
-    return jsonify([dict(account) for account in accounts])
+    return jsonify(account_list)
 
 @app.route('/api/accounts', methods=['POST'])
 @smart_auth_required
@@ -882,6 +965,185 @@ def get_execution_history():
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+# Tag Management Routes
+@app.route('/api/tags', methods=['GET'])
+@smart_auth_required
+def get_tags():
+    """Get all tags"""
+    conn = get_db_connection()
+    tags = conn.execute('SELECT * FROM tags ORDER BY name').fetchall()
+    conn.close()
+    return jsonify([dict(tag) for tag in tags])
+
+@app.route('/api/tags', methods=['POST'])
+@smart_auth_required
+def create_tag():
+    """Create a new tag"""
+    data = request.get_json()
+    
+    if not data or not data.get('name'):
+        return jsonify({'error': 'Tag name is required'}), 400
+    
+    tag_name = data['name'].strip().lower()
+    tag_color = data.get('color', '#6B7280')
+    
+    conn = get_db_connection()
+    try:
+        cursor = conn.execute(
+            'INSERT INTO tags (name, color) VALUES (?, ?)',
+            (tag_name, tag_color)
+        )
+        tag_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'id': tag_id,
+            'name': tag_name,
+            'color': tag_color
+        }), 201
+    except sqlite3.IntegrityError:
+        conn.close()
+        return jsonify({'error': 'Tag already exists'}), 409
+
+@app.route('/api/accounts/<int:account_id>/tags', methods=['POST'])
+@smart_auth_required
+def add_account_tag(account_id):
+    """Add a tag to an account"""
+    data = request.get_json()
+    tag_id = data.get('tag_id')
+    
+    if not tag_id:
+        return jsonify({'error': 'Tag ID is required'}), 400
+    
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            'INSERT INTO account_tags (account_id, tag_id) VALUES (?, ?)',
+            (account_id, tag_id)
+        )
+        conn.commit()
+        conn.close()
+        return jsonify({'message': 'Tag added successfully'}), 201
+    except sqlite3.IntegrityError:
+        conn.close()
+        return jsonify({'error': 'Tag already assigned to account'}), 409
+
+@app.route('/api/accounts/<int:account_id>/tags/<int:tag_id>', methods=['DELETE'])
+@smart_auth_required
+def remove_account_tag(account_id, tag_id):
+    """Remove a tag from an account"""
+    conn = get_db_connection()
+    conn.execute(
+        'DELETE FROM account_tags WHERE account_id = ? AND tag_id = ?',
+        (account_id, tag_id)
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({'message': 'Tag removed successfully'})
+
+@app.route('/api/accounts/<int:account_id>/copy-actions', methods=['POST'])
+@smart_auth_required
+def copy_account_actions(account_id):
+    """Copy actions from one account to multiple target accounts"""
+    data = request.get_json()
+    target_account_ids = data.get('target_account_ids', [])
+    
+    if not target_account_ids:
+        return jsonify({'error': 'No target accounts specified'}), 400
+    
+    conn = get_db_connection()
+    
+    # Get source account info
+    source_account = conn.execute(
+        'SELECT platform, username FROM accounts WHERE id = ?',
+        (account_id,)
+    ).fetchone()
+    
+    if not source_account:
+        conn.close()
+        return jsonify({'error': 'Source account not found'}), 404
+    
+    # Get all active actions from source account
+    source_actions = conn.execute('''
+        SELECT action_type, jap_service_id, service_name, parameters 
+        FROM actions 
+        WHERE account_id = ? AND is_active = 1
+    ''', (account_id,)).fetchall()
+    
+    if not source_actions:
+        conn.close()
+        return jsonify({'error': 'No actions to copy'}), 400
+    
+    # Copy actions to each target account
+    results = {'success': [], 'failed': []}
+    
+    for target_id in target_account_ids:
+        # Skip if copying to self
+        if target_id == account_id:
+            continue
+        
+        # Get target account info
+        target_account = conn.execute(
+            'SELECT platform, username FROM accounts WHERE id = ?',
+            (target_id,)
+        ).fetchone()
+        
+        if not target_account:
+            results['failed'].append({
+                'account_id': target_id,
+                'error': 'Account not found'
+            })
+            continue
+        
+        try:
+            # Copy each action
+            for action in source_actions:
+                conn.execute('''
+                    INSERT INTO actions (account_id, action_type, jap_service_id, service_name, parameters)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (
+                    target_id,
+                    action['action_type'],
+                    action['jap_service_id'],
+                    action['service_name'],
+                    action['parameters']
+                ))
+            
+            conn.commit()
+            results['success'].append({
+                'account_id': target_id,
+                'username': target_account['username'],
+                'platform': target_account['platform'],
+                'actions_copied': len(source_actions)
+            })
+            
+            # Log the copy operation
+            log_console('ACCT', 
+                f"Copied {len(source_actions)} actions from @{source_account['username']} to @{target_account['username']}", 
+                'success'
+            )
+            
+        except Exception as e:
+            results['failed'].append({
+                'account_id': target_id,
+                'username': target_account['username'],
+                'error': str(e)
+            })
+    
+    conn.close()
+    
+    return jsonify({
+        'message': f"Actions copied to {len(results['success'])} accounts",
+        'source': {
+            'account_id': account_id,
+            'username': source_account['username'],
+            'platform': source_account['platform'],
+            'actions_count': len(source_actions)
+        },
+        'results': results
+    })
 
 @app.route('/api/history/<jap_order_id>/refresh-status', methods=['POST'])
 @smart_auth_required
