@@ -267,6 +267,11 @@ class SocialMediaManager {
                     ${this.renderRSSStatus(account)}
                 </td>
                 <td class="px-4 py-3">
+                    <span class="font-medium ${account.total_spent > 0 ? 'text-green-600' : 'text-gray-500'}">
+                        $${(account.total_spent || 0).toFixed(2)}
+                    </span>
+                </td>
+                <td class="px-4 py-3">
                     ${this.renderEnabledToggle(account)}
                 </td>
                 <td class="px-4 py-3">
