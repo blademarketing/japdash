@@ -413,12 +413,9 @@ def get_accounts():
     conn = get_db_connection()
     accounts = conn.execute('''
         SELECT a.*, 
-               COUNT(DISTINCT ac.id) as action_count,
-               COALESCE(SUM(eh.cost), 0) as total_spent
+               (SELECT COUNT(*) FROM actions WHERE account_id = a.id AND is_active = 1) as action_count,
+               COALESCE((SELECT SUM(cost) FROM execution_history WHERE account_id = a.id AND cost > 0), 0) as total_spent
         FROM accounts a
-        LEFT JOIN actions ac ON a.id = ac.account_id AND ac.is_active = 1
-        LEFT JOIN execution_history eh ON a.id = eh.account_id
-        GROUP BY a.id
         ORDER BY a.created_at DESC
     ''').fetchall()
     
