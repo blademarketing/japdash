@@ -673,6 +673,45 @@ def create_account_action(account_id):
     
     return jsonify(response_data), 201
 
+@app.route('/api/actions/<int:action_id>', methods=['PUT'])
+@smart_auth_required
+def update_action(action_id):
+    """Update an existing action"""
+    data = request.get_json()
+    
+    required_fields = ['action_type', 'jap_service_id', 'service_name', 'parameters']
+    if not all(field in data for field in required_fields):
+        return jsonify({'error': 'Missing required fields'}), 400
+    
+    conn = get_db_connection()
+    
+    # Check if action exists
+    action = conn.execute('SELECT * FROM actions WHERE id=?', (action_id,)).fetchone()
+    if not action:
+        conn.close()
+        return jsonify({'error': 'Action not found'}), 404
+    
+    # Update the action
+    conn.execute('''
+        UPDATE actions 
+        SET action_type=?, jap_service_id=?, service_name=?, parameters=?
+        WHERE id=?
+    ''', (
+        data['action_type'],
+        data['jap_service_id'],
+        data['service_name'],
+        json.dumps(data['parameters']),
+        action_id
+    ))
+    
+    conn.commit()
+    conn.close()
+    
+    # Log the update
+    log_console('ACCT', f'Action {action_id} updated successfully', 'success')
+    
+    return jsonify({'message': 'Action updated successfully', 'action_id': action_id})
+
 @app.route('/api/actions/<int:action_id>', methods=['DELETE'])
 @smart_auth_required
 def delete_action(action_id):

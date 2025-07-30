@@ -3,6 +3,7 @@ class SocialMediaManager {
         this.accounts = [];
         this.currentEditId = null;
         this.currentActionAccount = null;
+        this.currentEditAction = null; // For editing actions
         this.japServices = {};
         this.allServices = []; // Flat array for search functionality
         this.quickAllServices = []; // For quick action search
@@ -587,8 +588,15 @@ class SocialMediaManager {
     closeActionModal() {
         document.getElementById('actionModal').classList.add('hidden');
         this.currentActionAccount = null;
+        this.currentEditAction = null;
         document.getElementById('actionConfigForm').reset();
         this.clearDynamicParameters();
+        
+        // Reset button text
+        const submitBtn = document.querySelector('#actionConfigForm button[type="submit"]');
+        if (submitBtn) {
+            submitBtn.innerHTML = '<i class="fas fa-rss mr-2"></i>Configure RSS Trigger';
+        }
     }
 
     async loadJAPServices(platform) {
@@ -1039,26 +1047,45 @@ class SocialMediaManager {
 
         try {
             const accountId = document.getElementById('actionAccountId').value;
-            const response = await fetch(`/api/accounts/${accountId}/actions`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(actionData)
-            });
+            let response;
+            
+            if (this.currentEditAction) {
+                // Update existing action
+                response = await fetch(`/api/actions/${this.currentEditAction.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(actionData)
+                });
+            } else {
+                // Create new action
+                response = await fetch(`/api/accounts/${accountId}/actions`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(actionData)
+                });
+            }
 
             if (response.ok) {
                 const result = await response.json();
-                this.showNotification(result.message || 'Action configured successfully!', 'success');
+                const message = this.currentEditAction ? 
+                    'Action updated successfully!' : 
+                    'Action configured successfully!';
+                this.showNotification(result.message || message, 'success');
                 
                 // Reload actions list and main accounts table
                 await this.loadAccountActions(accountId);
                 await this.loadAccounts();
                 
-                // Reset form
+                // Reset form and edit state
                 document.getElementById('actionConfigForm').reset();
                 this.clearDynamicParameters();
+                this.currentEditAction = null;
+                
+                // Reset button text
+                submitButton.innerHTML = '<i class="fas fa-rss mr-2"></i>Configure RSS Trigger';
             } else {
                 const error = await response.json();
-                this.showNotification(error.error || 'Error configuring action', 'error');
+                this.showNotification(error.error || 'Error saving action', 'error');
             }
         } catch (error) {
             console.error('Error configuring action:', error);
@@ -1076,6 +1103,9 @@ class SocialMediaManager {
             const response = await fetch(`/api/accounts/${accountId}/actions`);
             const actions = await response.json();
             
+            // Store actions for inline editing
+            this.currentActions = actions;
+            
             const container = document.getElementById('actionsList');
             
             if (actions.length === 0) {
@@ -1085,11 +1115,92 @@ class SocialMediaManager {
 
             container.innerHTML = actions.map(action => {
                 const isLLMEnabled = action.parameters.use_llm_generation;
-                const llmInfo = isLLMEnabled ? `
-                    <div class="text-xs text-purple-600 mt-1">
-                        <i class="fas fa-robot mr-1"></i>AI Generation Enabled
-                    </div>
-                ` : '';
+                
+                // Build comment preview section
+                let commentPreview = '';
+                
+                // Remove debug log
+                
+                // Check for comment-related actions (more flexible matching)
+                // Also check service name as fallback
+                const isCommentAction = (action.action_type && action.action_type.toLowerCase().includes('comment')) ||
+                                       (action.service_name && action.service_name.toLowerCase().includes('comment'));
+                
+                if (isCommentAction) {
+                    if (isLLMEnabled && action.parameters.comment_directives) {
+                        commentPreview = `
+                            <div class="mt-2 p-2 bg-purple-50 rounded text-xs">
+                                <div class="font-medium text-purple-700 mb-1">
+                                    <i class="fas fa-robot mr-1"></i>AI Prompt:
+                                    <button onclick="app.startInlineEdit(${action.id}, 'ai_prompt')" class="ml-2 text-purple-600 hover:text-purple-800" title="Click to edit">
+                                        <i class="fas fa-pen text-xs"></i>
+                                    </button>
+                                </div>
+                                <div id="ai-prompt-${action.id}" class="text-purple-600 italic">
+                                    <div class="view-mode">"${action.parameters.comment_directives}"</div>
+                                    <div class="edit-mode hidden">
+                                        <textarea class="w-full p-2 border rounded text-sm" rows="3">${action.parameters.comment_directives}</textarea>
+                                        <div class="flex gap-2 mt-2">
+                                            <button onclick="app.saveInlineEdit(${action.id}, 'ai_prompt', ${action.jap_service_id}, '${action.service_name.replace(/'/g, "\\'")}')" class="px-2 py-1 bg-green-500 text-white rounded text-xs hover:bg-green-600">
+                                                <i class="fas fa-check mr-1"></i>Save
+                                            </button>
+                                            <button onclick="app.cancelInlineEdit(${action.id}, 'ai_prompt')" class="px-2 py-1 bg-gray-300 text-gray-700 rounded text-xs hover:bg-gray-400">
+                                                <i class="fas fa-times mr-1"></i>Cancel
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    } else if (action.parameters.custom_comments) {
+                        // Parse and display regular comments
+                        const commentText = action.parameters.custom_comments || '';
+                        const comments = commentText.split('\n').filter(c => c.trim());
+                        
+                        if (comments.length > 0) {
+                            const preview = comments.slice(0, 3).join('<br>');
+                            const hasMore = comments.length > 3;
+                        
+                            commentPreview = `
+                                <div class="mt-2 p-2 bg-gray-50 rounded text-xs action-comment-preview">
+                                    <div class="font-medium text-gray-700 mb-1 flex items-center justify-between">
+                                        <span>
+                                            <i class="fas fa-comment mr-1"></i>Comments (${comments.length}):
+                                            <button onclick="app.startInlineEdit(${action.id}, 'comments')" class="ml-2 text-gray-600 hover:text-gray-800" title="Click to edit">
+                                                <i class="fas fa-pen text-xs"></i>
+                                            </button>
+                                        </span>
+                                        ${comments.length > 3 ? `
+                                            <button onclick="app.toggleCommentExpand(${action.id})" class="text-blue-500 hover:text-blue-700">
+                                                <span class="expand-text">Show all</span>
+                                                <i class="fas fa-chevron-down ml-1"></i>
+                                            </button>
+                                        ` : ''}
+                                    </div>
+                                    <div id="comments-${action.id}" class="text-gray-600">
+                                        <div class="view-mode comment-preview" data-action-id="${action.id}">
+                                            <div class="preview-content">${preview}</div>
+                                            ${comments.length > 3 ? `
+                                                <div class="full-content hidden">${comments.join('<br>')}</div>
+                                            ` : ''}
+                                        </div>
+                                        <div class="edit-mode hidden">
+                                            <textarea class="w-full p-2 border rounded text-sm" rows="5">${action.parameters.custom_comments}</textarea>
+                                            <div class="flex gap-2 mt-2">
+                                                <button onclick="app.saveInlineEdit(${action.id}, 'comments', ${action.jap_service_id}, '${action.service_name.replace(/'/g, "\\'")}')" class="px-2 py-1 bg-green-500 text-white rounded text-xs hover:bg-green-600">
+                                                    <i class="fas fa-check mr-1"></i>Save
+                                                </button>
+                                                <button onclick="app.cancelInlineEdit(${action.id}, 'comments')" class="px-2 py-1 bg-gray-300 text-gray-700 rounded text-xs hover:bg-gray-400">
+                                                    <i class="fas fa-times mr-1"></i>Cancel
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            `;
+                        }
+                    }
+                }
                 
                 return `
                     <div class="flex items-center justify-between p-3 bg-white border rounded-lg">
@@ -1101,15 +1212,37 @@ class SocialMediaManager {
                                 ${isLLMEnabled ? '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800"><i class="fas fa-robot mr-1"></i>AI</span>' : ''}
                             </div>
                             <div class="text-xs text-gray-500 mt-1">
-                                Quantity: ${action.parameters.use_range ? `${action.parameters.quantity_min}-${action.parameters.quantity_max}` : action.parameters.quantity} | Triggered: ${action.order_count || 0} times | Completed: ${action.completed_orders || 0}
+                                <span id="quantity-display-${action.id}">
+                                    Quantity: 
+                                    <span class="inline-edit-trigger hover:bg-gray-200 px-1 rounded cursor-pointer" onclick="app.startInlineEdit(${action.id}, 'quantity')" title="Click to edit">
+                                        ${action.parameters.use_range ? `${action.parameters.quantity_min}-${action.parameters.quantity_max}` : action.parameters.quantity}
+                                        <i class="fas fa-pen text-xs ml-1"></i>
+                                    </span>
+                                </span>
+                                <span id="quantity-edit-${action.id}" class="hidden">
+                                    ${action.parameters.use_range ? `
+                                        <input type="number" id="quantity-min-${action.id}" value="${action.parameters.quantity_min}" class="w-16 px-1 border rounded text-xs" min="1">
+                                        -
+                                        <input type="number" id="quantity-max-${action.id}" value="${action.parameters.quantity_max}" class="w-16 px-1 border rounded text-xs" min="1">
+                                    ` : `
+                                        <input type="number" id="quantity-single-${action.id}" value="${action.parameters.quantity}" class="w-20 px-1 border rounded text-xs" min="1">
+                                    `}
+                                    <button onclick="app.saveQuantityEdit(${action.id}, ${action.parameters.use_range}, ${action.jap_service_id}, '${action.service_name.replace(/'/g, "\\'")}')" class="ml-1 text-green-600 hover:text-green-800">
+                                        <i class="fas fa-check text-xs"></i>
+                                    </button>
+                                    <button onclick="app.cancelInlineEdit(${action.id}, 'quantity')" class="ml-1 text-red-600 hover:text-red-800">
+                                        <i class="fas fa-times text-xs"></i>
+                                    </button>
+                                </span>
+                                | Triggered: ${action.order_count || 0} times | Completed: ${action.completed_orders || 0}
                             </div>
                             <div class="text-xs text-blue-600 mt-1">
                                 <i class="fas fa-rss mr-1"></i>RSS Trigger Ready
                             </div>
-                            ${llmInfo}
+                            ${commentPreview}
                         </div>
                         <div class="flex gap-2">
-                            <button onclick="app.deleteAction(${action.id})" class="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-xs">
+                            <button onclick="app.deleteAction(${action.id})" class="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-xs" title="Delete">
                                 <i class="fas fa-trash"></i>
                             </button>
                         </div>
@@ -1143,6 +1276,71 @@ class SocialMediaManager {
             console.error('Error executing action:', error);
             this.showNotification('Error executing action', 'error');
         }
+    }
+
+    editAction(action) {
+        // Store the action being edited
+        this.currentEditAction = action;
+        
+        // Scroll to the form
+        document.getElementById('addActionSection').scrollIntoView({ behavior: 'smooth' });
+        
+        // Set form values
+        document.getElementById('actionType').value = action.action_type;
+        this.onActionTypeChange({ target: { value: action.action_type } });
+        
+        // Wait for services to load, then set the service
+        setTimeout(() => {
+            // Create the service value object
+            const serviceValue = JSON.stringify({
+                service_id: action.jap_service_id,
+                name: action.service_name,
+                rate: action.parameters.rate || '',
+                min_quantity: action.parameters.min_quantity || 1,
+                max_quantity: action.parameters.max_quantity || 1000,
+                description: ''
+            });
+            
+            document.getElementById('japService').value = serviceValue;
+            document.getElementById('serviceSearch').value = `ID: ${action.jap_service_id} - ${action.service_name}`;
+            this.onServiceChange({ target: { value: serviceValue } });
+            
+            // Wait for dynamic parameters to generate, then fill them
+            setTimeout(() => {
+                // Fill quantity
+                if (action.parameters.use_range) {
+                    document.getElementById('param_use_range').checked = true;
+                    this.toggleQuantityRange();
+                    document.getElementById('param_quantity_min').value = action.parameters.quantity_min || '';
+                    document.getElementById('param_quantity_max').value = action.parameters.quantity_max || '';
+                } else {
+                    document.getElementById('param_quantity').value = action.parameters.quantity || '';
+                }
+                
+                // Fill comments if it's a comment action
+                if (action.action_type.includes('comment')) {
+                    if (action.parameters.use_llm_generation) {
+                        document.getElementById('param_use_llm_generation').checked = true;
+                        this.toggleLLMGeneration();
+                        document.getElementById('param_llm_prompt').value = action.parameters.comment_directives || '';
+                        
+                        // Set emoji and hashtag options
+                        if (document.getElementById('param_use_emojis')) {
+                            document.getElementById('param_use_emojis').checked = action.parameters.use_emojis || false;
+                        }
+                        if (document.getElementById('param_use_hashtags')) {
+                            document.getElementById('param_use_hashtags').checked = action.parameters.use_hashtags || false;
+                        }
+                    } else if (action.parameters.custom_comments) {
+                        document.getElementById('param_comments').value = action.parameters.custom_comments;
+                    }
+                }
+                
+                // Update button text
+                const submitBtn = document.querySelector('#actionConfigForm button[type="submit"]');
+                submitBtn.innerHTML = '<i class="fas fa-save mr-2"></i>Update Action';
+            }, 100);
+        }, 100);
     }
 
     async deleteAction(actionId) {
@@ -2494,6 +2692,148 @@ class SocialMediaManager {
     getRandomColor() {
         const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#14B8A6'];
         return colors[Math.floor(Math.random() * colors.length)];
+    }
+
+    toggleCommentExpand(actionId) {
+        const container = document.querySelector(`.comment-preview[data-action-id="${actionId}"]`);
+        const button = container.parentElement.parentElement.querySelector('button[onclick*="toggleCommentExpand"]');
+        const expandText = button.querySelector('.expand-text');
+        const icon = button.querySelector('i');
+        const previewContent = container.querySelector('.preview-content');
+        const fullContent = container.querySelector('.full-content');
+        
+        if (fullContent.classList.contains('hidden')) {
+            // Expand
+            previewContent.classList.add('hidden');
+            fullContent.classList.remove('hidden');
+            expandText.textContent = 'Show less';
+            icon.classList.remove('fa-chevron-down');
+            icon.classList.add('fa-chevron-up');
+        } else {
+            // Collapse
+            previewContent.classList.remove('hidden');
+            fullContent.classList.add('hidden');
+            expandText.textContent = 'Show all';
+            icon.classList.remove('fa-chevron-up');
+            icon.classList.add('fa-chevron-down');
+        }
+    }
+
+    startInlineEdit(actionId, fieldType) {
+        if (fieldType === 'ai_prompt') {
+            const container = document.getElementById(`ai-prompt-${actionId}`);
+            container.querySelector('.view-mode').classList.add('hidden');
+            container.querySelector('.edit-mode').classList.remove('hidden');
+        } else if (fieldType === 'comments') {
+            const container = document.getElementById(`comments-${actionId}`);
+            container.querySelector('.view-mode').classList.add('hidden');
+            container.querySelector('.edit-mode').classList.remove('hidden');
+        } else if (fieldType === 'quantity') {
+            document.getElementById(`quantity-display-${actionId}`).classList.add('hidden');
+            document.getElementById(`quantity-edit-${actionId}`).classList.remove('hidden');
+        }
+    }
+
+    cancelInlineEdit(actionId, fieldType) {
+        if (fieldType === 'ai_prompt') {
+            const container = document.getElementById(`ai-prompt-${actionId}`);
+            container.querySelector('.view-mode').classList.remove('hidden');
+            container.querySelector('.edit-mode').classList.add('hidden');
+        } else if (fieldType === 'comments') {
+            const container = document.getElementById(`comments-${actionId}`);
+            container.querySelector('.view-mode').classList.remove('hidden');
+            container.querySelector('.edit-mode').classList.add('hidden');
+        } else if (fieldType === 'quantity') {
+            document.getElementById(`quantity-display-${actionId}`).classList.remove('hidden');
+            document.getElementById(`quantity-edit-${actionId}`).classList.add('hidden');
+        }
+    }
+
+    async saveInlineEdit(actionId, fieldType, serviceId, serviceName) {
+        // Get the current action data
+        const action = this.findActionById(actionId);
+        if (!action) return;
+
+        const parameters = { ...action.parameters };
+
+        if (fieldType === 'ai_prompt') {
+            const textarea = document.querySelector(`#ai-prompt-${actionId} textarea`);
+            parameters.comment_directives = textarea.value.trim();
+            
+            if (!parameters.comment_directives) {
+                this.showNotification('AI prompt cannot be empty', 'error');
+                return;
+            }
+        } else if (fieldType === 'comments') {
+            const textarea = document.querySelector(`#comments-${actionId} textarea`);
+            parameters.custom_comments = textarea.value.trim();
+            
+            if (!parameters.custom_comments) {
+                this.showNotification('Comments cannot be empty', 'error');
+                return;
+            }
+        }
+
+        await this.updateAction(actionId, action.action_type, serviceId, serviceName, parameters);
+    }
+
+    async saveQuantityEdit(actionId, useRange, serviceId, serviceName) {
+        const action = this.findActionById(actionId);
+        if (!action) return;
+
+        const parameters = { ...action.parameters };
+
+        if (useRange) {
+            const min = parseInt(document.getElementById(`quantity-min-${actionId}`).value);
+            const max = parseInt(document.getElementById(`quantity-max-${actionId}`).value);
+            
+            if (min > max) {
+                this.showNotification('Minimum cannot be greater than maximum', 'error');
+                return;
+            }
+            
+            parameters.quantity_min = min;
+            parameters.quantity_max = max;
+            parameters.quantity = min; // For compatibility
+        } else {
+            parameters.quantity = parseInt(document.getElementById(`quantity-single-${actionId}`).value);
+        }
+
+        await this.updateAction(actionId, action.action_type, serviceId, serviceName, parameters);
+    }
+
+    async updateAction(actionId, actionType, serviceId, serviceName, parameters) {
+        try {
+            const response = await fetch(`/api/actions/${actionId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action_type: actionType,
+                    jap_service_id: serviceId,
+                    service_name: serviceName,
+                    parameters: parameters
+                })
+            });
+
+            if (response.ok) {
+                this.showNotification('Updated successfully!', 'success');
+                // Reload the actions list
+                if (this.currentActionAccount) {
+                    await this.loadAccountActions(this.currentActionAccount.id);
+                }
+            } else {
+                const error = await response.json();
+                this.showNotification(error.error || 'Error updating', 'error');
+            }
+        } catch (error) {
+            console.error('Error updating action:', error);
+            this.showNotification('Error updating action', 'error');
+        }
+    }
+
+    findActionById(actionId) {
+        if (!this.currentActions) return null;
+        return this.currentActions.find(action => action.id === actionId);
     }
 
     showNotification(message, type = 'info') {
