@@ -606,10 +606,13 @@ def get_account_actions(account_id):
     conn = get_db_connection()
     actions = conn.execute('''
         SELECT a.*, 
-               COUNT(o.id) as order_count,
-               SUM(CASE WHEN o.status = 'completed' THEN 1 ELSE 0 END) as completed_orders
+               COUNT(eh.id) as order_count,
+               SUM(CASE WHEN eh.status = 'completed' THEN 1 ELSE 0 END) as completed_orders
         FROM actions a
-        LEFT JOIN orders o ON a.id = o.action_id
+        LEFT JOIN execution_history eh ON 
+            a.account_id = eh.account_id AND 
+            a.jap_service_id = eh.service_id AND
+            eh.execution_type = 'rss_trigger'
         WHERE a.account_id = ?
         GROUP BY a.id
         ORDER BY a.created_at DESC
