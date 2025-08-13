@@ -245,8 +245,9 @@ def check_and_apply_migrations():
             conn.execute('CREATE INDEX IF NOT EXISTS idx_screenshots_platform ON screenshots(platform)')
             conn.execute('CREATE INDEX IF NOT EXISTS idx_screenshots_timestamp ON screenshots(capture_timestamp)')
             
-            # Add GoLogin settings
+            # Add GoLogin settings (both old and new key names for compatibility)
             conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('gologin_api_key', '')")
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('gologin_api_token', '')")
             conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('gologin_facebook_profile_id', '')")
             conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('gologin_instagram_profile_id', '')")
             conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('gologin_twitter_profile_id', '')")
@@ -254,7 +255,7 @@ def check_and_apply_migrations():
             conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('screenshot_enabled', 'true')")
             conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('screenshot_store_as_files', 'false')")
             conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('screenshot_max_retries', '3')")
-            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('screenshot_api_url', 'https://your-domain:8443')")
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('screenshot_api_url', 'https://gologin.electric-marinade.com:8443')")
             conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('screenshot_api_key', '')")
             
             # Mark migration as applied
