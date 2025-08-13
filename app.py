@@ -5,14 +5,16 @@ from werkzeug.security import generate_password_hash, check_password_hash
 import sqlite3
 import os
 import json
+import time
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import logging
 from logging.handlers import RotatingFileHandler
-from jap_client import JAPClient
-from rss_client import RSSAppClient
-from rss_poller import RSSPoller
-from llm_client import FlowiseClient
+from api_clients.jap_client import JAPClient
+from api_clients.rss_client import RSSAppClient
+from src.rss_poller import RSSPoller
+from api_clients.llm_client import FlowiseClient
+from api_clients.screenshot_client import ScreenshotClient
 
 # Load environment variables from .env file
 load_dotenv()
@@ -119,6 +121,7 @@ DATABASE = os.getenv('DATABASE_PATH', 'social_media_accounts.db')
 JAP_API_KEY = os.getenv('JAP_API_KEY')
 RSS_API_KEY = os.getenv('RSS_API_KEY')
 RSS_API_SECRET = os.getenv('RSS_API_SECRET')
+GOLOGIN_API_KEY = os.getenv('GOLOGIN_API_KEY', '')
 
 # Validate required environment variables
 if not JAP_API_KEY:
@@ -138,6 +141,9 @@ llm_client = FlowiseClient(
     api_key="_iutUPVRnWyGKyoZfj1t0WIdLMZCcvAF8ONsBy3LhUU",
     log_console_func=log_console
 )
+
+# Initialize screenshot client (will load settings from database)
+screenshot_client = ScreenshotClient()
 
 def get_db_connection():
     conn = sqlite3.connect(DATABASE)
@@ -199,6 +205,67 @@ def check_and_apply_migrations():
             log_console('SYSTEM', 'Database migration v2_add_tags applied (tags support)', 'success')
         except Exception as e:
             print(f"Error applying migration v2_add_tags: {e}")
+            conn.rollback()
+            raise
+    
+    # Check if v3 migration is needed (screenshots)
+    if 'v3_add_screenshots' not in applied:
+        print("Applying migration v3_add_screenshots...")
+        try:
+            # Create screenshots table
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS screenshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    execution_id INTEGER NOT NULL,
+                    screenshot_type TEXT NOT NULL,
+                    url TEXT NOT NULL,
+                    platform TEXT NOT NULL,
+                    gologin_profile_id TEXT NOT NULL,
+                    screenshot_data TEXT,
+                    file_path TEXT,
+                    dimensions_width INTEGER,
+                    dimensions_height INTEGER,
+                    capture_timestamp TIMESTAMP NOT NULL,
+                    status TEXT DEFAULT 'pending',
+                    error_message TEXT,
+                    retry_count INTEGER DEFAULT 0,
+                    capture_duration_ms INTEGER,
+                    container_id TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (execution_id) REFERENCES execution_history (id) ON DELETE CASCADE,
+                    UNIQUE(execution_id, screenshot_type)
+                )
+            ''')
+            
+            # Create indexes for performance
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_screenshots_execution_id ON screenshots(execution_id)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_screenshots_type ON screenshots(screenshot_type)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_screenshots_status ON screenshots(status)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_screenshots_platform ON screenshots(platform)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_screenshots_timestamp ON screenshots(capture_timestamp)')
+            
+            # Add GoLogin settings
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('gologin_api_key', '')")
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('gologin_facebook_profile_id', '')")
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('gologin_instagram_profile_id', '')")
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('gologin_twitter_profile_id', '')")
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('gologin_tiktok_profile_id', '')")
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('screenshot_enabled', 'true')")
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('screenshot_store_as_files', 'false')")
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('screenshot_max_retries', '3')")
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('screenshot_api_url', 'https://your-domain:8443')")
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('screenshot_api_key', '')")
+            
+            # Mark migration as applied
+            conn.execute('INSERT INTO schema_migrations (version) VALUES (?)', ('v3_add_screenshots',))
+            conn.commit()
+            print("Migration v3_add_screenshots applied successfully!")
+            
+            # Log to console
+            log_console('SYSTEM', 'Database migration v3_add_screenshots applied (screenshot support)', 'success')
+        except Exception as e:
+            print(f"Error applying migration v3_add_screenshots: {e}")
             conn.rollback()
             raise
     
@@ -883,7 +950,60 @@ def quick_execute_action():
             else:
                 return jsonify({'error': f'AI comment generation failed: {llm_result["error"]}'}), 400
         
-        # Create JAP order
+        # First, capture "before" screenshot BEFORE creating the order
+        execution_id = None
+        try:
+            # Pre-create execution record to get ID for screenshot linkage
+            conn = get_db_connection()
+            cursor = conn.execute('''
+                INSERT INTO execution_history 
+                (jap_order_id, execution_type, platform, target_url, service_id, service_name, 
+                 quantity, cost, status, parameters, account_username)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                '',  # Will update with actual order ID after creation
+                'instant',
+                data['platform'],
+                data['link'],
+                data['service_id'],
+                data['service_name'],
+                data['quantity'],
+                (data['quantity'] / 1000) * data.get('service_rate', 0),
+                'preparing',  # Special status before order creation
+                json.dumps({
+                    'custom_comments': custom_comments,
+                    'service_rate': data.get('service_rate', 0),
+                    'use_llm_generation': data.get('use_llm_generation', False),
+                    'comment_directives': data.get('comment_directives'),
+                    'comment_count': data.get('comment_count'),
+                    'use_hashtags': data.get('use_hashtags'),
+                    'use_emojis': data.get('use_emojis')
+                }),
+                'Quick Execute'
+            ))
+            
+            execution_id = cursor.lastrowid
+            conn.commit()
+            conn.close()
+            
+            # Capture "before" screenshot synchronously (to ensure it's taken before order)
+            log_console('SCREENSHOT', f'Quick Execute: Capturing before screenshot for {data["link"]}', 'info')
+            before_result = screenshot_client.capture_screenshot(
+                url=data['link'],
+                platform=data['platform'],
+                execution_id=execution_id,
+                screenshot_type='before'
+            )
+            
+            if before_result['success']:
+                log_console('SCREENSHOT', f'Quick Execute: Before screenshot captured successfully', 'success')
+            else:
+                log_console('SCREENSHOT', f'Quick Execute: Before screenshot failed: {before_result.get("error", "Unknown error")}', 'error')
+                
+        except Exception as e:
+            log_console('SCREENSHOT', f'Quick Execute: Screenshot setup failed: {str(e)}', 'error')
+        
+        # Now create JAP order
         order_response = jap_client.create_order(
             service_id=data['service_id'],
             link=data['link'],
@@ -892,47 +1012,40 @@ def quick_execute_action():
         )
         
         if 'error' in order_response:
+            # If order creation failed, update the execution status
+            if execution_id:
+                conn = get_db_connection()
+                conn.execute('UPDATE execution_history SET status = ?, jap_order_id = ? WHERE id = ?', 
+                           ('failed', f'FAILED_{int(time.time())}', execution_id))
+                conn.commit()
+                conn.close()
             return jsonify({'error': order_response['error']}), 400
         
-        # Calculate cost (approximate based on service rate - could be improved)
-        estimated_cost = (data['quantity'] / 1000) * data.get('service_rate', 0)
-        
-        # Record execution in history
-        conn = get_db_connection()
-        conn.execute('''
-            INSERT INTO execution_history 
-            (jap_order_id, execution_type, platform, target_url, service_id, service_name, 
-             quantity, cost, status, parameters, account_username)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            order_response['order'],
-            'instant',
-            data['platform'],
-            data['link'],
-            data['service_id'],
-            data['service_name'],
-            data['quantity'],
-            estimated_cost,
-            'pending',
-            json.dumps({
-                'custom_comments': custom_comments,  # Using the potentially AI-generated comments
-                'service_rate': data.get('service_rate', 0),
-                'use_llm_generation': data.get('use_llm_generation', False),
-                'comment_directives': data.get('comment_directives'),
-                'comment_count': data.get('comment_count'),
-                'use_hashtags': data.get('use_hashtags'),
-                'use_emojis': data.get('use_emojis')
-            }),
-            'Quick Execute'  # Default display name for instant executions
-        ))
-        conn.commit()
-        conn.close()
+        # Update execution with actual order ID and set to pending
+        if execution_id:
+            conn = get_db_connection()
+            conn.execute('UPDATE execution_history SET jap_order_id = ?, status = ? WHERE id = ?', 
+                       (order_response['order'], 'pending', execution_id))
+            conn.commit()
+            conn.close()
+            
+            log_console('SCREENSHOT', f'Quick Execute: After screenshot will be triggered when order status becomes completed', 'info')
         
         return jsonify({
             'order_id': order_response['order'],
             'message': 'Quick action executed successfully'
         })
         
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/screenshots/<int:execution_id>')
+@smart_auth_required
+def get_screenshots(execution_id):
+    """Get screenshots for an execution"""
+    try:
+        screenshots = screenshot_client.get_screenshots_for_execution(execution_id)
+        return jsonify({'screenshots': screenshots})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -1201,6 +1314,15 @@ def refresh_execution_status(jap_order_id):
         # Update execution history with cost if available
         conn = get_db_connection()
         
+        # Get current execution details before updating
+        old_execution = conn.execute('''
+            SELECT id, status, target_url, platform 
+            FROM execution_history 
+            WHERE jap_order_id = ?
+        ''', (jap_order_id,)).fetchone()
+        
+        new_status = jap_status.get('status', 'unknown').lower()
+        
         # Check if JAP status includes cost information
         cost = jap_status.get('charge', jap_status.get('cost', None))
         if cost is not None:
@@ -1208,23 +1330,70 @@ def refresh_execution_status(jap_order_id):
                 UPDATE execution_history 
                 SET status = ?, cost = ?, updated_at = CURRENT_TIMESTAMP 
                 WHERE jap_order_id = ?
-            ''', (jap_status.get('status', 'unknown').lower(), float(cost), jap_order_id))
+            ''', (new_status, float(cost), jap_order_id))
         else:
             conn.execute('''
                 UPDATE execution_history 
                 SET status = ?, updated_at = CURRENT_TIMESTAMP 
                 WHERE jap_order_id = ?
-            ''', (jap_status.get('status', 'unknown').lower(), jap_order_id))
+            ''', (new_status, jap_order_id))
         
         # Also update orders table if exists
         conn.execute('''
             UPDATE orders 
             SET status = ?, updated_at = CURRENT_TIMESTAMP 
             WHERE jap_order_id = ?
-        ''', (jap_status.get('status', 'unknown').lower(), jap_order_id))
+        ''', (new_status, jap_order_id))
         
         conn.commit()
+        
+        # Check if status changed to 'completed' and trigger "after" screenshot
+        should_capture_after_screenshot = False
+        if old_execution and old_execution['status'] != 'completed' and new_status == 'completed':
+            # Check if "after" screenshot doesn't already exist to avoid duplicates
+            existing_after_screenshot = conn.execute('''
+                SELECT id FROM screenshots 
+                WHERE execution_id = ? AND screenshot_type = 'after' AND status = 'completed'
+            ''', (old_execution['id'],)).fetchone()
+            
+            if not existing_after_screenshot:
+                should_capture_after_screenshot = True
+                execution_id = old_execution['id']
+                target_url = old_execution['target_url'] 
+                platform = old_execution['platform']
+        
         conn.close()
+        
+        # Capture "after" screenshot asynchronously if needed
+        if should_capture_after_screenshot:
+            try:
+                import threading
+                
+                def capture_after_screenshot():
+                    try:
+                        log_console('SCREENSHOT', f'Status Refresh: Order {jap_order_id} completed - capturing after screenshot for {target_url}', 'info')
+                        
+                        after_result = screenshot_client.capture_screenshot(
+                            url=target_url,
+                            platform=platform,
+                            execution_id=execution_id,
+                            screenshot_type='after'
+                        )
+                        
+                        if after_result['success']:
+                            log_console('SCREENSHOT', f'Status Refresh: After screenshot captured successfully for order {jap_order_id}', 'success')
+                        else:
+                            log_console('SCREENSHOT', f'Status Refresh: After screenshot failed for order {jap_order_id}: {after_result.get("error", "Unknown error")}', 'error')
+                            
+                    except Exception as e:
+                        log_console('SCREENSHOT', f'Status Refresh: After screenshot error for order {jap_order_id}: {str(e)}', 'error')
+                
+                # Start after screenshot capture in background thread
+                screenshot_thread = threading.Thread(target=capture_after_screenshot, daemon=True)
+                screenshot_thread.start()
+                
+            except Exception as e:
+                log_console('SCREENSHOT', f'Status Refresh: Failed to start after screenshot for order {jap_order_id}: {str(e)}', 'error')
         
         return jsonify({
             'message': 'Status updated successfully',
@@ -1918,15 +2087,30 @@ def get_settings():
                 return '•' * len(key)
             return key[:4] + '•' * (len(key) - 8) + key[-4:]
         
+        # Get GoLogin and screenshot settings from database
+        conn = get_db_connection()
+        db_settings = {}
+        for key in ['gologin_facebook_profile_id', 'gologin_instagram_profile_id', 
+                   'gologin_twitter_profile_id', 'gologin_tiktok_profile_id',
+                   'screenshot_api_url', 'screenshot_api_key']:
+            result = conn.execute('SELECT value FROM settings WHERE key = ?', (key,)).fetchone()
+            db_settings[key] = result['value'] if result else ''
+        conn.close()
+
         return jsonify({
             'jap_api_key': mask_key(JAP_API_KEY),
             'rss_api_key': mask_key(RSS_API_KEY),
             'rss_api_secret': mask_key(RSS_API_SECRET),
+            'gologin_api_key': mask_key(GOLOGIN_API_KEY),
+            'screenshot_api_key': mask_key(db_settings.get('screenshot_api_key', '')),
             'jap_api_key_full': JAP_API_KEY,  # Full key for eye toggle (server-side only)
             'rss_api_key_full': RSS_API_KEY,
             'rss_api_secret_full': RSS_API_SECRET,
+            'gologin_api_key_full': GOLOGIN_API_KEY,
+            'screenshot_api_key_full': db_settings.get('screenshot_api_key', ''),
             'polling_interval': rss_poller.polling_interval // 60,  # Convert to minutes
-            'time_zone': os.getenv('TIME_ZONE', 'UTC')
+            'time_zone': os.getenv('TIME_ZONE', 'UTC'),
+            **db_settings
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -1937,7 +2121,7 @@ def save_settings():
     """Save system settings to .env file"""
     try:
         # Declare global variables at the start
-        global JAP_API_KEY, RSS_API_KEY, RSS_API_SECRET, jap_client, rss_client, rss_poller
+        global JAP_API_KEY, RSS_API_KEY, RSS_API_SECRET, GOLOGIN_API_KEY, jap_client, rss_client, rss_poller, screenshot_client
         
         data = request.get_json()
         
@@ -1959,6 +2143,8 @@ def save_settings():
             env_vars['RSS_API_KEY'] = data['rss_api_key']
         if 'rss_api_secret' in data:
             env_vars['RSS_API_SECRET'] = data['rss_api_secret']
+        if 'gologin_api_key' in data:
+            env_vars['GOLOGIN_API_KEY'] = data['gologin_api_key']
         if 'polling_interval' in data:
             # Store in seconds for internal use
             rss_poller.polling_interval = int(data['polling_interval']) * 60
@@ -1988,7 +2174,21 @@ def save_settings():
             RSS_API_SECRET = data['rss_api_secret']
             if 'RSS API client' not in updated_components:
                 updated_components.append('RSS API client')
+        if 'gologin_api_key' in data:
+            GOLOGIN_API_KEY = data['gologin_api_key']
+            updated_components.append('GoLogin screenshot client')
         
+        # Update GoLogin and screenshot settings in database
+        conn = get_db_connection()
+        for key in ['gologin_facebook_profile_id', 'gologin_instagram_profile_id', 
+                   'gologin_twitter_profile_id', 'gologin_tiktok_profile_id',
+                   'screenshot_api_url', 'screenshot_api_key']:
+            if key in data:
+                conn.execute('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', 
+                           (key, data[key]))
+        conn.commit()
+        conn.close()
+
         # Recreate client instances with updated API keys
         if 'jap_api_key' in data:
             jap_client = JAPClient(JAP_API_KEY)
@@ -2010,6 +2210,11 @@ def save_settings():
                 updated_components.append('RSS polling service (restarted)')
             else:
                 updated_components.append('RSS polling service (ready)')
+                
+        # Recreate screenshot client if screenshot settings were updated
+        if 'gologin_api_key' in data or 'screenshot_api_key' in data:
+            global screenshot_client
+            screenshot_client = ScreenshotClient()  # Will load fresh settings from database
         
         # Build informative message
         if updated_components:

@@ -183,6 +183,7 @@
                                 <th class="px-3 py-2 text-left text-gray-600 font-medium">Quantity</th>
                                 <th class="px-3 py-2 text-left text-gray-600 font-medium">Cost</th>
                                 <th class="px-3 py-2 text-left text-gray-600 font-medium">Status</th>
+                                <th class="px-3 py-2 text-left text-gray-600 font-medium">Screenshots</th>
                                 <th class="px-3 py-2 text-left text-gray-600 font-medium">Date</th>
                                 <th class="px-3 py-2 text-left text-gray-600 font-medium">Actions</th>
                             </tr>
@@ -283,7 +284,7 @@
                         <i class="fas fa-key text-blue-500 mr-2"></i>API Configuration
                     </h3>
                     
-                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         <!-- JAP API Settings -->
                         <div class="space-y-4">
                             <h4 class="font-medium text-gray-700">JAP (Social Media Services)</h4>
@@ -324,6 +325,79 @@
                                         <i class="fas fa-eye"></i>
                                     </button>
                                 </div>
+                            </div>
+                        </div>
+
+                        <!-- GoLogin API Settings -->
+                        <div class="space-y-4">
+                            <h4 class="font-medium text-gray-700">GoLogin (Screenshots)</h4>
+                            <div>
+                                <label for="gologinApiKey" class="block text-sm font-medium text-gray-600 mb-1">API Key</label>
+                                <div class="relative">
+                                    <input type="password" id="gologinApiKey" 
+                                           class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                           placeholder="Enter GoLogin API Key">
+                                    <button type="button" id="toggleGologinKey" class="absolute right-2 top-2 text-gray-500 hover:text-gray-700">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Screenshot API Configuration -->
+                    <div class="mt-6 p-4 bg-blue-50 rounded-lg">
+                        <h4 class="font-medium text-gray-700 mb-3">Screenshot Service Configuration</h4>
+                        <p class="text-sm text-gray-600 mb-4">Configure your screenshot API service endpoint and authentication</p>
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                            <div>
+                                <label for="screenshotApiUrl" class="block text-sm font-medium text-gray-600 mb-1">Screenshot API URL</label>
+                                <input type="text" id="screenshotApiUrl" 
+                                       class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                       placeholder="https://your-screenshot-service:8443">
+                            </div>
+                            <div>
+                                <label for="screenshotApiKey" class="block text-sm font-medium text-gray-600 mb-1">Screenshot API Key</label>
+                                <div class="relative">
+                                    <input type="password" id="screenshotApiKey" 
+                                           class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                           placeholder="Enter Screenshot Service API Key">
+                                    <button type="button" id="toggleScreenshotKey" class="absolute right-2 top-2 text-gray-500 hover:text-gray-700">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Browser Profile Configuration -->
+                    <div class="mt-6 p-4 bg-gray-50 rounded-lg">
+                        <h4 class="font-medium text-gray-700 mb-3">GoLogin Browser Profiles</h4>
+                        <p class="text-sm text-gray-600 mb-4">Configure browser profile IDs for each platform to capture screenshots</p>
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                            <div>
+                                <label for="facebookProfileId" class="block text-sm font-medium text-gray-600 mb-1">Facebook Profile ID</label>
+                                <input type="text" id="facebookProfileId" 
+                                       class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                       placeholder="Enter profile ID">
+                            </div>
+                            <div>
+                                <label for="instagramProfileId" class="block text-sm font-medium text-gray-600 mb-1">Instagram Profile ID</label>
+                                <input type="text" id="instagramProfileId" 
+                                       class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                       placeholder="Enter profile ID">
+                            </div>
+                            <div>
+                                <label for="twitterProfileId" class="block text-sm font-medium text-gray-600 mb-1">X/Twitter Profile ID</label>
+                                <input type="text" id="twitterProfileId" 
+                                       class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                       placeholder="Enter profile ID">
+                            </div>
+                            <div>
+                                <label for="tiktokProfileId" class="block text-sm font-medium text-gray-600 mb-1">TikTok Profile ID</label>
+                                <input type="text" id="tiktokProfileId" 
+                                       class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                       placeholder="Enter profile ID">
                             </div>
                         </div>
                     </div>
@@ -681,6 +755,75 @@
                     </button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- Screenshot Modal -->
+    <div id="screenshotModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-6 w-full max-w-6xl mx-4 max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold text-gray-800">
+                    <i class="fas fa-camera text-blue-500 mr-2"></i>
+                    Order Screenshots
+                </h2>
+                <button id="closeScreenshotModal" class="text-gray-500 hover:text-gray-700">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <div id="screenshotModalContent">
+                <!-- Order Info -->
+                <div id="screenshotOrderInfo" class="mb-6 p-4 bg-gray-50 rounded-lg">
+                    <!-- Will be populated with order details -->
+                </div>
+
+                <!-- Screenshots Display -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <!-- Before Screenshot -->
+                    <div class="space-y-3">
+                        <h3 class="text-lg font-semibold text-gray-800 flex items-center">
+                            <i class="fas fa-clock text-orange-500 mr-2"></i>
+                            Before Screenshot
+                        </h3>
+                        <div id="beforeScreenshotContainer" class="bg-gray-100 rounded-lg p-4 min-h-[300px] flex items-center justify-center">
+                            <div id="beforeScreenshotContent">
+                                <i class="fas fa-spinner fa-spin text-gray-400 text-3xl"></i>
+                                <p class="text-gray-500 mt-2">Loading screenshot...</p>
+                            </div>
+                        </div>
+                        <div id="beforeScreenshotInfo" class="text-sm text-gray-600">
+                            <!-- Screenshot metadata will be shown here -->
+                        </div>
+                    </div>
+
+                    <!-- After Screenshot -->
+                    <div class="space-y-3">
+                        <h3 class="text-lg font-semibold text-gray-800 flex items-center">
+                            <i class="fas fa-check text-green-500 mr-2"></i>
+                            After Screenshot
+                        </h3>
+                        <div id="afterScreenshotContainer" class="bg-gray-100 rounded-lg p-4 min-h-[300px] flex items-center justify-center">
+                            <div id="afterScreenshotContent">
+                                <i class="fas fa-spinner fa-spin text-gray-400 text-3xl"></i>
+                                <p class="text-gray-500 mt-2">Loading screenshot...</p>
+                            </div>
+                        </div>
+                        <div id="afterScreenshotInfo" class="text-sm text-gray-600">
+                            <!-- Screenshot metadata will be shown here -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Screenshot Actions -->
+                <div class="mt-6 flex gap-3 justify-center">
+                    <button id="refreshScreenshots" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg transition-colors">
+                        <i class="fas fa-sync-alt mr-2"></i>Refresh Screenshots
+                    </button>
+                    <button id="downloadScreenshots" class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg transition-colors">
+                        <i class="fas fa-download mr-2"></i>Download Screenshots
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 

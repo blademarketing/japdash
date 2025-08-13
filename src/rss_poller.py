@@ -4,9 +4,10 @@ import time
 import threading
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
-from rss_client import RSSAppClient
-from jap_client import JAPClient
-from llm_client import FlowiseClient
+from api_clients.rss_client import RSSAppClient
+from api_clients.jap_client import JAPClient
+from api_clients.llm_client import FlowiseClient
+from api_clients.screenshot_client import ScreenshotClient
 
 
 class RSSPoller:
@@ -34,6 +35,11 @@ class RSSPoller:
             endpoint_url="https://flowise.electric-marinade.com/api/v1/prediction/f474d703-0582-4170-a5e1-22d49c9472cd",
             api_key="_iutUPVRnWyGKyoZfj1t0WIdLMZCcvAF8ONsBy3LhUU",
             log_console_func=log_console_func
+        )
+        
+        # Initialize screenshot client (will get settings from database)
+        self.screenshot_client = ScreenshotClient(
+            api_key=""  # ScreenshotClient will get from settings
         )
     
     def get_db_connection(self):
@@ -385,17 +391,6 @@ class RSSPoller:
                     self.log_console('EXEC', f'RSS_TRIGGER {account["platform"]}: {action["service_name"]} | SKIPPED | {error_msg}', 'error')
                     return {'success': False, 'error': error_msg, 'skipped': True}
             
-            # Create JAP order
-            order_response = self.jap_client.create_order(
-                service_id=action['jap_service_id'],
-                link=target_url,
-                quantity=quantity,
-                custom_comments=custom_comments
-            )
-            
-            if 'error' in order_response:
-                return {'success': False, 'error': order_response['error']}
-            
             # Estimate cost based on service rate if available
             estimated_cost = 0
             try:
@@ -405,8 +400,8 @@ class RSSPoller:
                     estimated_cost = (quantity / 1000) * float(service_info['rate'])
             except:
                 pass  # Use 0 if can't calculate
-            
-            # Record execution in history
+
+            # First, pre-create execution record to get ID for screenshot linkage
             execution_params = {
                 **parameters,
                 'triggered_by_post': post.get('link') or post.get('url'),
@@ -420,13 +415,13 @@ class RSSPoller:
                 execution_params['llm_generated'] = True
                 execution_params['original_directives'] = parameters.get('comment_directives', '')
             
-            conn.execute('''
+            cursor = conn.execute('''
                 INSERT INTO execution_history 
                 (jap_order_id, execution_type, platform, target_url, service_id, service_name, 
                  quantity, cost, status, account_id, account_username, parameters)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
-                order_response['order'],
+                '',  # Will update with actual order ID after creation
                 'rss_trigger',
                 account['platform'],
                 target_url,
@@ -434,13 +429,54 @@ class RSSPoller:
                 action['service_name'],
                 quantity,
                 estimated_cost,
-                'pending',
+                'preparing',  # Special status before order creation
                 account['id'],
                 account['username'],
                 json.dumps(execution_params)
             ))
             
+            execution_id = cursor.lastrowid
             conn.commit()
+            
+            # Capture "before" screenshot synchronously (to ensure it's taken before order)
+            try:
+                self.log_console('SCREENSHOT', f'RSS_TRIGGER: Capturing before screenshot for {target_url}', 'info')
+                before_result = self.screenshot_client.capture_screenshot(
+                    url=target_url,
+                    platform=account['platform'],
+                    execution_id=execution_id,
+                    screenshot_type='before'
+                )
+                
+                if before_result['success']:
+                    self.log_console('SCREENSHOT', f'RSS_TRIGGER: Before screenshot captured successfully', 'success')
+                else:
+                    self.log_console('SCREENSHOT', f'RSS_TRIGGER: Before screenshot failed: {before_result.get("error", "Unknown error")}', 'error')
+                    
+            except Exception as e:
+                self.log_console('SCREENSHOT', f'RSS_TRIGGER: Screenshot setup failed: {str(e)}', 'error')
+            
+            # Now create JAP order
+            order_response = self.jap_client.create_order(
+                service_id=action['jap_service_id'],
+                link=target_url,
+                quantity=quantity,
+                custom_comments=custom_comments
+            )
+            
+            if 'error' in order_response:
+                # If order creation failed, update the execution status
+                conn.execute('UPDATE execution_history SET status = ?, jap_order_id = ? WHERE id = ?', 
+                           ('failed', f'FAILED_{int(time.time())}', execution_id))
+                conn.commit()
+                return {'success': False, 'error': order_response['error']}
+                
+            # Update execution with actual order ID and set to pending
+            conn.execute('UPDATE execution_history SET jap_order_id = ?, status = ? WHERE id = ?', 
+                       (order_response['order'], 'pending', execution_id))
+            conn.commit()
+            
+            self.log_console('SCREENSHOT', f'RSS_TRIGGER: After screenshot will be triggered when order status becomes completed', 'info')
             
             # Log to console  
             execution_type = 'LLM+RSS_TRIGGER' if self._is_comment_service_with_llm(action, parameters) else 'RSS_TRIGGER'
@@ -735,3 +771,5 @@ class RSSPoller:
             
         finally:
             conn.close()
+    
+    

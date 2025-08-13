@@ -81,6 +81,11 @@ class SocialMediaManager {
         document.getElementById('historyPrevBtn').addEventListener('click', () => this.historyPrevPage());
         document.getElementById('historyNextBtn').addEventListener('click', () => this.historyNextPage());
         
+        // Screenshot modal events
+        document.getElementById('closeScreenshotModal').addEventListener('click', () => this.closeScreenshotModal());
+        document.getElementById('refreshScreenshots').addEventListener('click', () => this.refreshCurrentScreenshots());
+        document.getElementById('downloadScreenshots').addEventListener('click', () => this.downloadCurrentScreenshots());
+        
         // Console logs events
         document.getElementById('pollNowBtn').addEventListener('click', () => this.pollRSSNow());
         document.getElementById('filterAll').addEventListener('click', () => this.setConsoleFilter('all'));
@@ -94,6 +99,8 @@ class SocialMediaManager {
         document.getElementById('toggleJapKey').addEventListener('click', () => this.togglePasswordVisibility('japApiKey', 'toggleJapKey'));
         document.getElementById('toggleRssKey').addEventListener('click', () => this.togglePasswordVisibility('rssApiKey', 'toggleRssKey'));
         document.getElementById('toggleRssSecret').addEventListener('click', () => this.togglePasswordVisibility('rssApiSecret', 'toggleRssSecret'));
+        document.getElementById('toggleGologinKey').addEventListener('click', () => this.togglePasswordVisibility('gologinApiKey', 'toggleGologinKey'));
+        document.getElementById('toggleScreenshotKey').addEventListener('click', () => this.togglePasswordVisibility('screenshotApiKey', 'toggleScreenshotKey'));
         document.getElementById('testApiKeys').addEventListener('click', () => this.testApiKeys());
         document.getElementById('saveSettings').addEventListener('click', () => this.saveSettings());
         
@@ -1988,6 +1995,12 @@ class SocialMediaManager {
                         ${this.formatStatus(execution.status)}
                     </span>
                 </td>
+                <td class="px-3 py-2">
+                    <button onclick="app.openScreenshotModal(${execution.id})" 
+                            class="text-purple-500 hover:text-purple-700 p-1" title="View Screenshots">
+                        <i class="fas fa-camera"></i>
+                    </button>
+                </td>
                 <td class="px-3 py-2 text-sm">${this.formatDate(execution.created_at)}</td>
                 <td class="px-3 py-2">
                     <button onclick="app.refreshExecutionStatus('${execution.jap_order_id}')" 
@@ -3111,13 +3124,22 @@ class SocialMediaManager {
                 this.fullApiKeys = {
                     jap: settings.jap_api_key_full || '',
                     rss_key: settings.rss_api_key_full || '',
-                    rss_secret: settings.rss_api_secret_full || ''
+                    rss_secret: settings.rss_api_secret_full || '',
+                    gologin: settings.gologin_api_key_full || '',
+                    screenshot: settings.screenshot_api_key_full || ''
                 };
                 
                 // Populate form with masked values
                 document.getElementById('japApiKey').value = settings.jap_api_key || '';
                 document.getElementById('rssApiKey').value = settings.rss_api_key || '';
                 document.getElementById('rssApiSecret').value = settings.rss_api_secret || '';
+                document.getElementById('gologinApiKey').value = settings.gologin_api_key || '';
+                document.getElementById('facebookProfileId').value = settings.gologin_facebook_profile_id || '';
+                document.getElementById('instagramProfileId').value = settings.gologin_instagram_profile_id || '';
+                document.getElementById('twitterProfileId').value = settings.gologin_twitter_profile_id || '';
+                document.getElementById('tiktokProfileId').value = settings.gologin_tiktok_profile_id || '';
+                document.getElementById('screenshotApiUrl').value = settings.screenshot_api_url || '';
+                document.getElementById('screenshotApiKey').value = settings.screenshot_api_key || '';
                 document.getElementById('pollingInterval').value = settings.polling_interval || 15;
                 document.getElementById('timeZone').value = settings.time_zone || 'UTC';
                 
@@ -3125,11 +3147,15 @@ class SocialMediaManager {
                 document.getElementById('japApiKey').type = 'password';
                 document.getElementById('rssApiKey').type = 'password';
                 document.getElementById('rssApiSecret').type = 'password';
+                document.getElementById('gologinApiKey').type = 'password';
+                document.getElementById('screenshotApiKey').type = 'password';
                 
                 // Reset eye icons
                 document.querySelector('#toggleJapKey i').className = 'fas fa-eye';
                 document.querySelector('#toggleRssKey i').className = 'fas fa-eye';
                 document.querySelector('#toggleRssSecret i').className = 'fas fa-eye';
+                document.querySelector('#toggleGologinKey i').className = 'fas fa-eye';
+                document.querySelector('#toggleScreenshotKey i').className = 'fas fa-eye';
                 
                 // Store current settings
                 this.currentSettings = settings;
@@ -3155,7 +3181,9 @@ class SocialMediaManager {
             const keyMap = {
                 'japApiKey': 'jap',
                 'rssApiKey': 'rss_key', 
-                'rssApiSecret': 'rss_secret'
+                'rssApiSecret': 'rss_secret',
+                'gologinApiKey': 'gologin',
+                'screenshotApiKey': 'screenshot'
             };
             
             const keyName = keyMap[inputId];
@@ -3179,6 +3207,10 @@ class SocialMediaManager {
                 input.value = settings.rss_api_key || '';
             } else if (inputId === 'rssApiSecret') {
                 input.value = settings.rss_api_secret || '';
+            } else if (inputId === 'gologinApiKey') {
+                input.value = settings.gologin_api_key || '';
+            } else if (inputId === 'screenshotApiKey') {
+                input.value = settings.screenshot_api_key || '';
             }
         }
     }
@@ -3231,12 +3263,24 @@ class SocialMediaManager {
         let japKey = document.getElementById('japApiKey').value;
         let rssKey = document.getElementById('rssApiKey').value;
         let rssSecret = document.getElementById('rssApiSecret').value;
+        let gologinKey = document.getElementById('gologinApiKey').value;
+        let screenshotApiKey = document.getElementById('screenshotApiKey').value;
+        const screenshotApiUrl = document.getElementById('screenshotApiUrl').value;
+        const facebookProfileId = document.getElementById('facebookProfileId').value;
+        const instagramProfileId = document.getElementById('instagramProfileId').value;
+        const twitterProfileId = document.getElementById('twitterProfileId').value;
+        const tiktokProfileId = document.getElementById('tiktokProfileId').value;
         const pollingInterval = parseInt(document.getElementById('pollingInterval').value);
         const timeZone = document.getElementById('timeZone').value;
         
         const settings = {
             polling_interval: pollingInterval,
-            time_zone: timeZone
+            time_zone: timeZone,
+            gologin_facebook_profile_id: facebookProfileId,
+            gologin_instagram_profile_id: instagramProfileId,
+            gologin_twitter_profile_id: twitterProfileId,
+            gologin_tiktok_profile_id: tiktokProfileId,
+            screenshot_api_url: screenshotApiUrl
         };
         
         // Handle API keys - use full keys if showing masked values, or user input if changed
@@ -3263,6 +3307,22 @@ class SocialMediaManager {
                 settings.rss_api_secret = this.fullApiKeys.rss_secret;
             } else {
                 settings.rss_api_secret = rssSecret;
+            }
+        }
+        
+        if (gologinKey) {
+            if (gologinKey.includes('•') && this.fullApiKeys) {
+                settings.gologin_api_key = this.fullApiKeys.gologin;
+            } else {
+                settings.gologin_api_key = gologinKey;
+            }
+        }
+        
+        if (screenshotApiKey) {
+            if (screenshotApiKey.includes('•') && this.fullApiKeys) {
+                settings.screenshot_api_key = this.fullApiKeys.screenshot;
+            } else {
+                settings.screenshot_api_key = screenshotApiKey;
             }
         }
         
@@ -3332,6 +3392,237 @@ class SocialMediaManager {
             case 'failed': return 'bg-red-100 text-red-800';
             case 'pending': return 'bg-yellow-100 text-yellow-800';
             default: return 'bg-gray-100 text-gray-800';
+        }
+    }
+
+    // Screenshot Management
+    async openScreenshotModal(executionId) {
+        try {
+            // Find the execution data
+            const execution = this.historyData.executions.find(e => e.id === executionId);
+            if (!execution) {
+                this.showNotification('Execution not found', 'error');
+                return;
+            }
+
+            // Populate order info
+            document.getElementById('screenshotOrderInfo').innerHTML = `
+                <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div>
+                        <span class="text-sm font-medium text-gray-600">Order ID:</span>
+                        <p class="text-sm font-mono">${execution.jap_order_id}</p>
+                    </div>
+                    <div>
+                        <span class="text-sm font-medium text-gray-600">Platform:</span>
+                        <p class="text-sm">${execution.platform}</p>
+                    </div>
+                    <div>
+                        <span class="text-sm font-medium text-gray-600">Service:</span>
+                        <p class="text-sm">${execution.service_name}</p>
+                    </div>
+                    <div>
+                        <span class="text-sm font-medium text-gray-600">Target URL:</span>
+                        <p class="text-sm"><a href="${execution.target_url}" target="_blank" class="text-blue-500 hover:text-blue-700">${execution.target_url.length > 40 ? execution.target_url.substring(0, 40) + '...' : execution.target_url}</a></p>
+                    </div>
+                </div>
+            `;
+
+            // Store current execution ID for refresh/download actions
+            this.currentScreenshotExecution = executionId;
+
+            // Load screenshots
+            await this.loadScreenshots(executionId);
+
+            // Show modal
+            document.getElementById('screenshotModal').classList.remove('hidden');
+
+        } catch (error) {
+            console.error('Error opening screenshot modal:', error);
+            this.showNotification('Error opening screenshot viewer', 'error');
+        }
+    }
+
+    closeScreenshotModal() {
+        document.getElementById('screenshotModal').classList.add('hidden');
+        this.currentScreenshotExecution = null;
+    }
+
+    async loadScreenshots(executionId) {
+        try {
+            const response = await fetch(`/api/screenshots/${executionId}`);
+            const data = await response.json();
+
+            if (data.error) {
+                this.showScreenshotError('both', data.error);
+                return;
+            }
+
+            const screenshots = data.screenshots || [];
+            const beforeScreenshot = screenshots.find(s => s.screenshot_type === 'before');
+            const afterScreenshot = screenshots.find(s => s.screenshot_type === 'after');
+
+            // Display before screenshot
+            this.displayScreenshot('before', beforeScreenshot);
+            
+            // Display after screenshot
+            this.displayScreenshot('after', afterScreenshot);
+
+        } catch (error) {
+            console.error('Error loading screenshots:', error);
+            this.showScreenshotError('both', 'Failed to load screenshots');
+        }
+    }
+
+    displayScreenshot(type, screenshot) {
+        const container = document.getElementById(`${type}ScreenshotContent`);
+        const infoContainer = document.getElementById(`${type}ScreenshotInfo`);
+
+        if (!screenshot) {
+            container.innerHTML = `
+                <div class="text-center text-gray-500">
+                    <i class="fas fa-camera-retro text-4xl mb-2"></i>
+                    <p>No ${type} screenshot available</p>
+                    <p class="text-xs">Screenshot may still be processing</p>
+                </div>
+            `;
+            infoContainer.innerHTML = '';
+            return;
+        }
+
+        if (screenshot.status === 'pending') {
+            container.innerHTML = `
+                <div class="text-center text-yellow-600">
+                    <i class="fas fa-clock text-4xl mb-2"></i>
+                    <p>Screenshot pending</p>
+                    <p class="text-xs">Capture in progress...</p>
+                </div>
+            `;
+        } else if (screenshot.status === 'capturing') {
+            container.innerHTML = `
+                <div class="text-center text-blue-600">
+                    <i class="fas fa-spinner fa-spin text-4xl mb-2"></i>
+                    <p>Capturing screenshot</p>
+                    <p class="text-xs">Please wait...</p>
+                </div>
+            `;
+        } else if (screenshot.status === 'failed') {
+            container.innerHTML = `
+                <div class="text-center text-red-600">
+                    <i class="fas fa-exclamation-triangle text-4xl mb-2"></i>
+                    <p>Screenshot failed</p>
+                    <p class="text-xs">${screenshot.error_message || 'Unknown error'}</p>
+                </div>
+            `;
+        } else if (screenshot.status === 'completed' && screenshot.screenshot_data) {
+            container.innerHTML = `
+                <div class="text-center">
+                    <img src="${screenshot.screenshot_data}" 
+                         alt="${type} screenshot" 
+                         class="max-w-full max-h-96 mx-auto rounded-lg shadow-md cursor-pointer hover:shadow-lg transition-shadow"
+                         onclick="this.requestFullscreen ? this.requestFullscreen() : this.webkitRequestFullscreen ? this.webkitRequestFullscreen() : null">
+                    <p class="text-xs text-gray-500 mt-2">Click to view fullscreen</p>
+                </div>
+            `;
+        } else {
+            container.innerHTML = `
+                <div class="text-center text-gray-500">
+                    <i class="fas fa-question-circle text-4xl mb-2"></i>
+                    <p>Screenshot status unknown</p>
+                    <p class="text-xs">Status: ${screenshot.status}</p>
+                </div>
+            `;
+        }
+
+        // Update info section
+        if (screenshot) {
+            const captureTime = screenshot.capture_timestamp ? new Date(screenshot.capture_timestamp).toLocaleString() : 'N/A';
+            const duration = screenshot.capture_duration_ms ? `${(screenshot.capture_duration_ms / 1000).toFixed(1)}s` : 'N/A';
+            const dimensions = screenshot.dimensions_width && screenshot.dimensions_height 
+                ? `${screenshot.dimensions_width}x${screenshot.dimensions_height}` 
+                : 'N/A';
+
+            infoContainer.innerHTML = `
+                <div class="text-xs space-y-1">
+                    <p><span class="font-medium">Status:</span> ${this.formatStatus(screenshot.status)}</p>
+                    <p><span class="font-medium">Captured:</span> ${captureTime}</p>
+                    <p><span class="font-medium">Duration:</span> ${duration}</p>
+                    <p><span class="font-medium">Dimensions:</span> ${dimensions}</p>
+                    ${screenshot.retry_count > 0 ? `<p><span class="font-medium">Retries:</span> ${screenshot.retry_count}</p>` : ''}
+                </div>
+            `;
+        } else {
+            infoContainer.innerHTML = '';
+        }
+    }
+
+    showScreenshotError(type, message) {
+        const types = type === 'both' ? ['before', 'after'] : [type];
+        
+        types.forEach(t => {
+            const container = document.getElementById(`${t}ScreenshotContent`);
+            container.innerHTML = `
+                <div class="text-center text-red-600">
+                    <i class="fas fa-exclamation-triangle text-4xl mb-2"></i>
+                    <p>Error loading screenshot</p>
+                    <p class="text-xs">${message}</p>
+                </div>
+            `;
+        });
+    }
+
+    async refreshCurrentScreenshots() {
+        if (!this.currentScreenshotExecution) return;
+        
+        const button = document.getElementById('refreshScreenshots');
+        const originalText = button.innerHTML;
+        
+        button.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Refreshing...';
+        button.disabled = true;
+        
+        try {
+            await this.loadScreenshots(this.currentScreenshotExecution);
+            this.showNotification('Screenshots refreshed', 'success');
+        } catch (error) {
+            this.showNotification('Error refreshing screenshots', 'error');
+        } finally {
+            button.innerHTML = originalText;
+            button.disabled = false;
+        }
+    }
+
+    async downloadCurrentScreenshots() {
+        if (!this.currentScreenshotExecution) return;
+        
+        try {
+            const response = await fetch(`/api/screenshots/${this.currentScreenshotExecution}`);
+            const data = await response.json();
+            
+            if (data.error) {
+                this.showNotification(data.error, 'error');
+                return;
+            }
+            
+            const screenshots = data.screenshots || [];
+            const execution = this.historyData.executions.find(e => e.id === this.currentScreenshotExecution);
+            const orderPrefix = execution ? execution.jap_order_id : 'unknown';
+            
+            screenshots.forEach(screenshot => {
+                if (screenshot.status === 'completed' && screenshot.screenshot_data) {
+                    // Create download link
+                    const link = document.createElement('a');
+                    link.href = screenshot.screenshot_data;
+                    link.download = `${orderPrefix}_${screenshot.screenshot_type}_screenshot.png`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                }
+            });
+            
+            this.showNotification('Screenshots downloaded', 'success');
+            
+        } catch (error) {
+            console.error('Error downloading screenshots:', error);
+            this.showNotification('Error downloading screenshots', 'error');
         }
     }
 }
