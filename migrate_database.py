@@ -205,6 +205,14 @@ class DatabaseMigrator:
                 )
             ''')
             
+            # Create settings table if it doesn't exist (for older databases)
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                )
+            ''')
+            
             # Check if already applied
             existing = conn.execute("SELECT version FROM schema_migrations WHERE version = 'v3_add_screenshots'").fetchone()
             if existing:
@@ -213,6 +221,13 @@ class DatabaseMigrator:
                 return True
             
             print("🔄 Applying v3_add_screenshots migration...")
+            
+            # Check what tables currently exist for diagnostics
+            existing_tables = [row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+            print(f"📋 Current tables: {', '.join(existing_tables)}")
+            
+            if 'settings' not in existing_tables:
+                print("ℹ️ Creating settings table (missing from original database)")
             
             # Create screenshots table
             conn.execute('''
