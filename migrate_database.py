@@ -293,6 +293,245 @@ class DatabaseMigrator:
                 conn.close()
             return False
     
+    def apply_v4_packages_migration(self):
+        """Apply v4 migration: Add packages system with network-specific order collections"""
+        try:
+            if not os.path.exists(self.db_path):
+                print(f"❌ Database not found: {self.db_path}")
+                return False
+            
+            conn = sqlite3.connect(self.db_path)
+            conn.execute("BEGIN")
+            
+            # Create schema_migrations table if it doesn't exist
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS schema_migrations (
+                    version TEXT PRIMARY KEY,
+                    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            # Check if already applied
+            existing = conn.execute("SELECT version FROM schema_migrations WHERE version = 'v4_add_packages'").fetchone()
+            if existing:
+                print("ℹ️ Migration v4_add_packages already applied")
+                conn.close()
+                return True
+            
+            print("🔄 Applying v4_add_packages migration...")
+            
+            # Check what tables currently exist for diagnostics
+            existing_tables = [row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+            print(f"📋 Current tables: {', '.join(existing_tables)}")
+            
+            # Create packages table
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS packages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    display_name TEXT NOT NULL UNIQUE,
+                    description TEXT,
+                    enabled BOOLEAN DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            # Create package_orders table for network-specific order collections
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS package_orders (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    package_id INTEGER NOT NULL,
+                    network TEXT NOT NULL,                -- 'instagram', 'facebook', 'x', 'tiktok'
+                    service_id INTEGER NOT NULL,          -- JAP service ID
+                    service_name TEXT NOT NULL,           -- Service display name
+                    quantity INTEGER NOT NULL,            -- Order quantity
+                    order_priority INTEGER DEFAULT 1,     -- Execution order within network
+                    
+                    -- Quick Execute parameters - preserved exactly as current system
+                    use_llm_generation BOOLEAN DEFAULT 0,
+                    comment_directives TEXT,
+                    comment_count INTEGER,
+                    use_hashtags BOOLEAN DEFAULT 0,
+                    use_emojis BOOLEAN DEFAULT 0,
+                    custom_comments TEXT,
+                    
+                    -- Additional service parameters (JSON for flexibility)
+                    service_parameters TEXT,              -- JSON of additional parameters
+                    
+                    enabled BOOLEAN DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    
+                    FOREIGN KEY (package_id) REFERENCES packages (id) ON DELETE CASCADE,
+                    UNIQUE(package_id, network, order_priority)  -- Ensure unique priorities per network
+                )
+            ''')
+            
+            # Create package_executions table to track package submissions
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS package_executions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    package_id INTEGER NOT NULL,
+                    target_url TEXT NOT NULL,             -- Submitted URL
+                    detected_network TEXT NOT NULL,       -- Auto-detected network
+                    status TEXT DEFAULT 'pending',        -- 'pending', 'processing', 'completed', 'failed'
+                    total_orders INTEGER DEFAULT 0,       -- Number of orders created
+                    completed_orders INTEGER DEFAULT 0,   -- Number of completed orders
+                    failed_orders INTEGER DEFAULT 0,      -- Number of failed orders
+                    error_message TEXT,                   -- Error details if failed
+                    execution_start TIMESTAMP,
+                    execution_end TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    
+                    FOREIGN KEY (package_id) REFERENCES packages (id) ON DELETE CASCADE
+                )
+            ''')
+            
+            # Create package_execution_orders to link individual orders to package executions
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS package_execution_orders (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    package_execution_id INTEGER NOT NULL,
+                    execution_history_id INTEGER NOT NULL,  -- Links to existing execution_history table
+                    package_order_id INTEGER NOT NULL,      -- The template order from package_orders
+                    jap_order_id TEXT NOT NULL,             -- JAP API order ID
+                    status TEXT DEFAULT 'pending',          -- JAP order status
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    
+                    FOREIGN KEY (package_execution_id) REFERENCES package_executions (id) ON DELETE CASCADE,
+                    FOREIGN KEY (execution_history_id) REFERENCES execution_history (id) ON DELETE CASCADE,
+                    FOREIGN KEY (package_order_id) REFERENCES package_orders (id) ON DELETE CASCADE
+                )
+            ''')
+            
+            # Create indexes for performance
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_package_orders_package_network ON package_orders(package_id, network)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_package_orders_priority ON package_orders(package_id, network, order_priority)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_package_executions_package ON package_executions(package_id)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_package_executions_network ON package_executions(detected_network)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_package_executions_status ON package_executions(status)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_package_execution_orders_package ON package_execution_orders(package_execution_id)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_package_execution_orders_execution ON package_execution_orders(execution_history_id)')
+            
+            # Mark migration as applied
+            conn.execute('INSERT INTO schema_migrations (version) VALUES (?)', ('v4_add_packages',))
+            
+            conn.commit()
+            conn.close()
+            
+            print("✅ Migration v4_add_packages applied successfully!")
+            print("📦 Added packages system with network-specific order collections")
+            print("🔗 Integrated with existing execution_history for tracking")
+            print("🎯 Supports auto-detection and routing by social network")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Migration failed: {e}")
+            if 'conn' in locals():
+                conn.rollback()
+                conn.close()
+            return False
+    
+    def apply_v5_simplify_packages_migration(self):
+        """Apply v5 migration: Remove priority and enabled fields from package_orders"""
+        try:
+            if not os.path.exists(self.db_path):
+                print(f"❌ Database not found: {self.db_path}")
+                return False
+            
+            conn = sqlite3.connect(self.db_path)
+            conn.execute("BEGIN")
+            
+            # Create schema_migrations table if it doesn't exist
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS schema_migrations (
+                    version TEXT PRIMARY KEY,
+                    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            # Check if already applied
+            existing = conn.execute("SELECT version FROM schema_migrations WHERE version = 'v5_simplify_packages'").fetchone()
+            if existing:
+                print("ℹ️ Migration v5_simplify_packages already applied")
+                conn.close()
+                return True
+            
+            print("🔄 Applying v5_simplify_packages migration...")
+            
+            # Check what tables currently exist for diagnostics
+            existing_tables = [row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+            print(f"📋 Current tables: {', '.join(existing_tables)}")
+            
+            # Create new package_orders table without priority and enabled fields
+            conn.execute('''
+                CREATE TABLE package_orders_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    package_id INTEGER NOT NULL,
+                    network TEXT NOT NULL,                -- 'instagram', 'facebook', 'x', 'tiktok'
+                    service_id INTEGER NOT NULL,          -- JAP service ID
+                    service_name TEXT NOT NULL,           -- Service display name
+                    quantity INTEGER NOT NULL,            -- Order quantity
+                    
+                    -- Quick Execute parameters - preserved exactly as current system
+                    use_llm_generation BOOLEAN DEFAULT 0,
+                    comment_directives TEXT,
+                    comment_count INTEGER,
+                    use_hashtags BOOLEAN DEFAULT 0,
+                    use_emojis BOOLEAN DEFAULT 0,
+                    custom_comments TEXT,
+                    
+                    -- Additional service parameters (JSON for flexibility)
+                    service_parameters TEXT,              -- JSON of additional parameters
+                    
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    
+                    FOREIGN KEY (package_id) REFERENCES packages (id) ON DELETE CASCADE
+                )
+            ''')
+            
+            # Copy data from old table to new table (excluding priority and enabled fields)
+            conn.execute('''
+                INSERT INTO package_orders_new (
+                    id, package_id, network, service_id, service_name, quantity,
+                    use_llm_generation, comment_directives, comment_count,
+                    use_hashtags, use_emojis, custom_comments, service_parameters,
+                    created_at, updated_at
+                )
+                SELECT 
+                    id, package_id, network, service_id, service_name, quantity,
+                    use_llm_generation, comment_directives, comment_count,
+                    use_hashtags, use_emojis, custom_comments, service_parameters,
+                    created_at, updated_at
+                FROM package_orders
+            ''')
+            
+            # Drop old table and rename new one
+            conn.execute('DROP TABLE package_orders')
+            conn.execute('ALTER TABLE package_orders_new RENAME TO package_orders')
+            
+            # Recreate indexes
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_package_orders_package_network ON package_orders(package_id, network)')
+            
+            # Mark migration as applied
+            conn.execute('INSERT INTO schema_migrations (version) VALUES (?)', ('v5_simplify_packages',))
+            
+            conn.commit()
+            conn.close()
+            
+            print("✅ Migration v5_simplify_packages applied successfully!")
+            print("🗑️ Removed priority and enabled fields from package_orders")
+            print("🔄 Simplified package order structure")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Migration failed: {e}")
+            if 'conn' in locals():
+                conn.rollback()
+                conn.close()
+            return False
+    
     def show_database_status(self):
         """Show current database status"""
         print("\n" + "="*60)
@@ -320,7 +559,7 @@ class DatabaseMigrator:
             tables = [row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").fetchall()]
             print(f"📋 Tables: {len(tables)}")
             
-            for table in ['accounts', 'execution_history', 'screenshots', 'settings']:
+            for table in ['accounts', 'execution_history', 'screenshots', 'packages', 'package_orders', 'package_executions', 'settings']:
                 if table in tables:
                     count = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                     print(f"   {table}: {count} records")
@@ -342,12 +581,14 @@ class DatabaseMigrator:
             print("\nAvailable Actions:")
             print("1. 📦 Create Backup")
             print("2. 🚀 Migrate to v3 (Screenshots)")
-            print("3. 📋 List Available Backups")
-            print("4. 🔄 Restore from Backup")
-            print("5. ✅ Verify Database Integrity")
-            print("6. ❌ Exit")
+            print("3. 📦 Migrate to v4 (Packages)")
+            print("4. 🔄 Migrate to v5 (Simplify Packages)")
+            print("5. 📋 List Available Backups")
+            print("6. 🔄 Restore from Backup")
+            print("7. ✅ Verify Database Integrity")
+            print("8. ❌ Exit")
             
-            choice = input("\nEnter your choice (1-6): ").strip()
+            choice = input("\nEnter your choice (1-8): ").strip()
             
             if choice == "1":
                 backup_path = self.create_backup()
@@ -382,6 +623,58 @@ class DatabaseMigrator:
                 input("\nPress Enter to continue...")
                 
             elif choice == "3":
+                print("\n📦 Starting Migration to v4 (Packages)")
+                print("-" * 40)
+                
+                current_version = self.get_database_version(self.db_path)
+                print(f"Current version: {current_version}")
+                
+                if current_version == "v4_add_packages":
+                    print("ℹ️ Database is already at v4. No migration needed.")
+                else:
+                    confirm = input("\n⚠️ This will modify your database. Continue? (y/N): ").strip().lower()
+                    if confirm == 'y':
+                        backup_path = self.create_backup()
+                        if backup_path:
+                            if self.apply_v4_packages_migration():
+                                print("\n🎉 Migration completed successfully!")
+                                self.verify_database_integrity()
+                            else:
+                                print("\n❌ Migration failed. Database not modified.")
+                        else:
+                            print("\n❌ Could not create backup. Migration aborted.")
+                    else:
+                        print("Migration cancelled.")
+                
+                input("\nPress Enter to continue...")
+                
+            elif choice == "4":
+                print("\n🔄 Starting Migration to v5 (Simplify Packages)")
+                print("-" * 40)
+                
+                current_version = self.get_database_version(self.db_path)
+                print(f"Current version: {current_version}")
+                
+                if current_version == "v5_simplify_packages":
+                    print("ℹ️ Database is already at v5. No migration needed.")
+                else:
+                    confirm = input("\n⚠️ This will modify your database. Continue? (y/N): ").strip().lower()
+                    if confirm == 'y':
+                        backup_path = self.create_backup()
+                        if backup_path:
+                            if self.apply_v5_simplify_packages_migration():
+                                print("\n🎉 Migration completed successfully!")
+                                self.verify_database_integrity()
+                            else:
+                                print("\n❌ Migration failed. Database not modified.")
+                        else:
+                            print("\n❌ Could not create backup. Migration aborted.")
+                    else:
+                        print("Migration cancelled.")
+                
+                input("\nPress Enter to continue...")
+                
+            elif choice == "5":
                 backups = self.get_available_backups()
                 print(f"\n📋 Available Backups ({len(backups)})")
                 print("-" * 80)
@@ -396,7 +689,7 @@ class DatabaseMigrator:
                 
                 input("\nPress Enter to continue...")
                 
-            elif choice == "4":
+            elif choice == "6":
                 backups = self.get_available_backups()
                 if not backups:
                     print("\n❌ No backups available for restore.")
@@ -440,13 +733,13 @@ class DatabaseMigrator:
                 
                 input("\nPress Enter to continue...")
                 
-            elif choice == "5":
+            elif choice == "7":
                 print("\n✅ Verifying Database Integrity")
                 print("-" * 40)
                 self.verify_database_integrity()
                 input("\nPress Enter to continue...")
                 
-            elif choice == "6":
+            elif choice == "8":
                 print("\n👋 Goodbye!")
                 break
                 

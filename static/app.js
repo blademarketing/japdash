@@ -21,6 +21,9 @@ class SocialMediaManager {
         this.mainFilteredTags = [];
         this.tagFilterLogic = 'or'; // or 'and'
         this.copyActionsSource = null;
+        this.packages = [];
+        this.currentEditPackage = null;
+        this.packageOrderIdCounter = 0;
         this.init();
     }
 
@@ -29,6 +32,7 @@ class SocialMediaManager {
         this.loadAccounts();
         this.loadJAPBalance();
         this.loadTags();
+        this.loadPackages();
     }
 
     bindEvents() {
@@ -71,6 +75,7 @@ class SocialMediaManager {
         
         // Tab events
         document.getElementById('accountsTab').addEventListener('click', () => this.switchTab('accounts'));
+        document.getElementById('packagesTab').addEventListener('click', () => this.switchTab('packages'));
         document.getElementById('historyTab').addEventListener('click', () => this.switchTab('history'));
         document.getElementById('logsTab').addEventListener('click', () => this.switchTab('logs'));
         document.getElementById('settingsTab').addEventListener('click', () => this.switchTab('settings'));
@@ -85,6 +90,22 @@ class SocialMediaManager {
         document.getElementById('closeScreenshotModal').addEventListener('click', () => this.closeScreenshotModal());
         document.getElementById('refreshScreenshots').addEventListener('click', () => this.refreshCurrentScreenshots());
         document.getElementById('downloadScreenshots').addEventListener('click', () => this.downloadCurrentScreenshots());
+        
+        // Package modal events
+        document.getElementById('addPackageBtn').addEventListener('click', () => this.openPackageModal());
+        document.getElementById('closePackageModal').addEventListener('click', () => this.closePackageModal());
+        document.getElementById('cancelPackageBtn').addEventListener('click', () => this.closePackageModal());
+        document.getElementById('packageForm').addEventListener('submit', (e) => this.handlePackageSubmit(e));
+        document.getElementById('packageExecuteForm').addEventListener('submit', (e) => this.handlePackageExecuteSubmit(e));
+        
+        // Package order events
+        document.getElementById('addInstagramOrder').addEventListener('click', () => this.addPackageOrder('instagram'));
+        document.getElementById('addFacebookOrder').addEventListener('click', () => this.addPackageOrder('facebook'));
+        document.getElementById('addXOrder').addEventListener('click', () => this.addPackageOrder('x'));
+        document.getElementById('addTikTokOrder').addEventListener('click', () => this.addPackageOrder('tiktok'));
+        
+        // Package platform tab events
+        this.bindPackagePlatformTabs();
         
         // Console logs events
         document.getElementById('pollNowBtn').addEventListener('click', () => this.pollRSSNow());
@@ -118,6 +139,10 @@ class SocialMediaManager {
         
         document.getElementById('quickExecuteModal').addEventListener('click', (e) => {
             if (e.target.id === 'quickExecuteModal') this.closeQuickExecuteModal();
+        });
+        
+        document.getElementById('packageModal').addEventListener('click', (e) => {
+            if (e.target.id === 'packageModal') this.closePackageModal();
         });
     }
 
@@ -1867,6 +1892,10 @@ class SocialMediaManager {
             ? 'px-4 py-2 text-sm font-medium text-blue-600 border-b-2 border-blue-600'
             : 'px-4 py-2 text-sm font-medium text-gray-500 border-b-2 border-transparent hover:text-gray-700';
         
+        document.getElementById('packagesTab').className = tabName === 'packages'
+            ? 'px-4 py-2 text-sm font-medium text-blue-600 border-b-2 border-blue-600'
+            : 'px-4 py-2 text-sm font-medium text-gray-500 border-b-2 border-transparent hover:text-gray-700';
+        
         document.getElementById('historyTab').className = tabName === 'history'
             ? 'px-4 py-2 text-sm font-medium text-blue-600 border-b-2 border-blue-600' 
             : 'px-4 py-2 text-sm font-medium text-gray-500 border-b-2 border-transparent hover:text-gray-700';
@@ -1881,6 +1910,7 @@ class SocialMediaManager {
         
         // Show/hide content
         document.getElementById('accountsContent').className = tabName === 'accounts' ? '' : 'hidden';
+        document.getElementById('packagesContent').className = tabName === 'packages' ? '' : 'hidden';
         document.getElementById('historyContent').className = tabName === 'history' ? '' : 'hidden';
         document.getElementById('logsContent').className = tabName === 'logs' ? '' : 'hidden';
         document.getElementById('settingsContent').className = tabName === 'settings' ? '' : 'hidden';
@@ -1890,7 +1920,9 @@ class SocialMediaManager {
         
         this.currentTab = tabName;
         
-        if (tabName === 'history') {
+        if (tabName === 'packages') {
+            this.loadPackages();
+        } else if (tabName === 'history') {
             this.loadHistory();
             this.loadHistoryStats();
             // Auto-refresh pending entries when loading history tab
@@ -3624,6 +3656,702 @@ class SocialMediaManager {
             console.error('Error downloading screenshots:', error);
             this.showNotification('Error downloading screenshots', 'error');
         }
+    }
+    
+    // Package Platform Tab Management
+    bindPackagePlatformTabs() {
+        const tabs = ['instagram', 'facebook', 'x', 'tiktok'];
+        tabs.forEach(platform => {
+            const tabButton = document.getElementById(`${platform}Tab`);
+            if (tabButton) {
+                tabButton.addEventListener('click', () => this.switchPackagePlatformTab(platform));
+            }
+        });
+        // Default to Instagram tab
+        this.switchPackagePlatformTab('instagram');
+    }
+    
+    switchPackagePlatformTab(platform) {
+        // Update tab buttons and content
+        const tabs = ['instagram', 'facebook', 'x', 'tiktok'];
+        tabs.forEach(tab => {
+            const tabButton = document.getElementById(`${tab}Tab`);
+            const tabContent = document.getElementById(`${tab}Content`);
+            
+            if (tabButton && tabContent) {
+                if (tab === platform) {
+                    // Active tab
+                    tabButton.className = 'package-platform-tab border-b-2 border-blue-500 text-blue-600 whitespace-nowrap py-2 px-1 font-medium text-sm';
+                    tabContent.classList.remove('hidden');
+                } else {
+                    // Inactive tab
+                    tabButton.className = 'package-platform-tab border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm';
+                    tabContent.classList.add('hidden');
+                }
+            }
+        });
+    }
+    
+    // Package Management Methods
+    async loadPackages() {
+        try {
+            const response = await fetch('/api/packages');
+            this.packages = await response.json();
+            this.renderPackagesTable();
+            this.populatePackageSelect();
+        } catch (error) {
+            console.error('Error loading packages:', error);
+        }
+    }
+    
+    renderPackagesTable() {
+        const tbody = document.getElementById('packagesTable');
+        const emptyState = document.getElementById('packagesEmptyState');
+        
+        if (this.packages.length === 0) {
+            tbody.innerHTML = '';
+            emptyState.classList.remove('hidden');
+            return;
+        }
+        
+        emptyState.classList.add('hidden');
+        
+        tbody.innerHTML = this.packages.map(pkg => {
+            const networkCount = Object.keys(pkg.networks).length;
+            const totalOrders = Object.values(pkg.networks).reduce((sum, orders) => sum + orders.length, 0);
+            const enabledText = pkg.enabled ? 
+                '<span class="px-2 py-1 text-xs font-semibold bg-green-100 text-green-800 rounded-full">Enabled</span>' :
+                '<span class="px-2 py-1 text-xs font-semibold bg-red-100 text-red-800 rounded-full">Disabled</span>';
+            
+            const networkBadges = Object.keys(pkg.networks).map(network => {
+                const networkIcons = {
+                    instagram: '<i class="fab fa-instagram text-pink-500"></i>',
+                    facebook: '<i class="fab fa-facebook text-blue-600"></i>',
+                    x: '<i class="fab fa-x-twitter text-black"></i>',
+                    tiktok: '<i class="fab fa-tiktok text-black"></i>'
+                };
+                return `<span class="inline-flex items-center px-2 py-1 text-xs bg-gray-100 rounded-full mr-1">
+                    ${networkIcons[network]} <span class="ml-1">${pkg.networks[network].length}</span>
+                </span>`;
+            }).join('');
+            
+            return `
+                <tr>
+                    <td class="px-4 py-3 font-medium text-gray-900">${pkg.display_name}</td>
+                    <td class="px-4 py-3 text-gray-600">${pkg.description || '-'}</td>
+                    <td class="px-4 py-3">
+                        <div class="flex flex-wrap gap-1">${networkBadges}</div>
+                    </td>
+                    <td class="px-4 py-3 text-center font-medium">${totalOrders}</td>
+                    <td class="px-4 py-3">${enabledText}</td>
+                    <td class="px-4 py-3 text-gray-600">-</td>
+                    <td class="px-4 py-3">
+                        <div class="flex gap-2">
+                            <button onclick="app.editPackage(${pkg.id})" class="text-blue-600 hover:text-blue-800 transition-colors" title="Edit Package">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button onclick="app.viewPackageExecutions(${pkg.id})" class="text-purple-600 hover:text-purple-800 transition-colors" title="View Executions">
+                                <i class="fas fa-history"></i>
+                            </button>
+                            <button onclick="app.deletePackage(${pkg.id})" class="text-red-600 hover:text-red-800 transition-colors" title="Delete Package">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    }
+    
+    populatePackageSelect() {
+        const select = document.getElementById('packageSelect');
+        select.innerHTML = '<option value="">Select a package...</option>';
+        
+        this.packages.filter(pkg => pkg.enabled).forEach(pkg => {
+            const option = document.createElement('option');
+            option.value = pkg.id;
+            option.textContent = pkg.display_name;
+            select.appendChild(option);
+        });
+    }
+    
+    async openPackageModal(packageId = null) {
+        const modal = document.getElementById('packageModal');
+        const title = document.getElementById('packageModalTitle');
+        const form = document.getElementById('packageForm');
+        
+        // Reset form
+        form.reset();
+        this.clearAllPackageOrders();
+        
+        // Load JAP services if not already loaded
+        if (!this.allServices || this.allServices.length === 0) {
+            await this.loadAllJAPServices();
+        }
+        
+        if (packageId) {
+            // Edit mode
+            this.currentEditPackage = this.packages.find(p => p.id === packageId);
+            title.innerHTML = '<i class="fas fa-box text-green-500 mr-2"></i>Edit Package';
+            
+            // Populate form
+            document.getElementById('packageName').value = this.currentEditPackage.display_name;
+            document.getElementById('packageDescription').value = this.currentEditPackage.description || '';
+            document.getElementById('packageEnabled').checked = this.currentEditPackage.enabled;
+            
+            // Populate network orders
+            Object.entries(this.currentEditPackage.networks).forEach(([network, orders]) => {
+                orders.forEach(order => {
+                    this.addPackageOrder(network, order);
+                });
+            });
+        } else {
+            // Create mode
+            this.currentEditPackage = null;
+            title.innerHTML = '<i class="fas fa-box text-green-500 mr-2"></i>Create New Package';
+        }
+        
+        modal.classList.remove('hidden');
+        
+        // Initialize platform tabs - the bindPackagePlatformTabs() already handles the default tab
+    }
+    
+    closePackageModal() {
+        document.getElementById('packageModal').classList.add('hidden');
+        document.getElementById('packageForm').reset();
+        this.clearAllPackageOrders();
+        this.currentEditPackage = null;
+    }
+    
+    clearAllPackageOrders() {
+        ['instagram', 'facebook', 'x', 'tiktok'].forEach(network => {
+            const container = document.getElementById(`${network}Orders`);
+            const emptyState = document.getElementById(`${network}EmptyState`);
+            
+            // Remove all order elements except empty state
+            Array.from(container.children).forEach(child => {
+                if (!child.id || !child.id.includes('EmptyState')) {
+                    child.remove();
+                }
+            });
+            
+            emptyState.classList.remove('hidden');
+        });
+    }
+    
+    addPackageOrder(network, orderData = null) {
+        const container = document.getElementById(`${network}Orders`);
+        const emptyState = document.getElementById(`${network}EmptyState`);
+        
+        emptyState.classList.add('hidden');
+        
+        const orderId = ++this.packageOrderIdCounter;
+        const orderDiv = document.createElement('div');
+        orderDiv.className = 'border border-gray-200 rounded p-2 bg-gray-50 mb-2';
+        orderDiv.id = `packageOrder_${network}_${orderId}`;
+        
+        // Default data or provided data
+        const data = orderData || {
+            service_id: '',
+            service_name: '',
+            quantity: 1,
+            use_llm_generation: false,
+            comment_directives: '',
+            comment_count: null,
+            use_hashtags: false,
+            use_emojis: false,
+            custom_comments: ''
+        };
+        
+        orderDiv.innerHTML = `
+            <div class="flex justify-between items-center mb-2">
+                <h4 class="font-medium text-gray-800 text-xs">Order ${orderId}</h4>
+                <button type="button" onclick="app.removePackageOrder('${network}', '${orderId}')" class="text-red-500 hover:text-red-700 text-xs">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <!-- Service Selection -->
+            <div class="mb-2">
+                <label class="block text-xs font-medium text-gray-700 mb-1">Service *</label>
+                <input type="text" class="package-service-search w-full px-2 py-1 border border-gray-300 rounded text-xs" 
+                       placeholder="Search service..." data-network="${network}" data-order="${orderId}" 
+                       value="${data.service_name}" required>
+                <input type="hidden" class="package-service-id" value="${data.service_id}">
+            </div>
+            
+            <!-- Dynamic Parameters Container -->
+            <div class="package-dynamic-params">
+                <!-- Will be populated based on service type -->
+            </div>
+        `;
+        
+        container.appendChild(orderDiv);
+        
+        // Update order numbers after addition
+        this.updatePackageOrderNumbers(network);
+        
+        // Bind events for this order
+        this.bindPackageOrderEvents(network, orderId, data);
+    }
+    
+    bindPackageOrderEvents(network, orderId, data = {}) {
+        const orderDiv = document.getElementById(`packageOrder_${network}_${orderId}`);
+        if (!orderDiv) {
+            console.error(`Order div not found: packageOrder_${network}_${orderId}`);
+            return;
+        }
+        
+        const serviceSearch = orderDiv.querySelector('.package-service-search');
+        if (!serviceSearch) {
+            console.error(`Service search input not found in order div: packageOrder_${network}_${orderId}`);
+            return;
+        }
+        
+        // Service search functionality
+        serviceSearch.addEventListener('input', (e) => this.handlePackageServiceSearch(e, network, orderId));
+        serviceSearch.addEventListener('focus', (e) => this.showPackageServiceDropdown(e, network, orderId));
+        serviceSearch.addEventListener('blur', (e) => this.hidePackageServiceDropdown(e, network, orderId));
+        
+        // If we have service data, generate parameters immediately
+        if (data.service_id && data.service_name) {
+            const service = this.findServiceById(data.service_id);
+            if (service) {
+                this.generatePackageOrderDynamicParams(network, orderId, service, data);
+            }
+        }
+    }
+    
+    removePackageOrder(network, orderId) {
+        const orderDiv = document.getElementById(`packageOrder_${network}_${orderId}`);
+        const container = document.getElementById(`${network}Orders`);
+        const emptyState = document.getElementById(`${network}EmptyState`);
+        
+        orderDiv.remove();
+        
+        // Update order numbers after removal
+        this.updatePackageOrderNumbers(network);
+        
+        // Show empty state if no orders left
+        const remainingOrders = container.children.length;
+        if (remainingOrders === 1) { // Only empty state remains
+            emptyState.classList.remove('hidden');
+        }
+    }
+    
+    async handlePackageSubmit(e) {
+        e.preventDefault();
+        
+        const packageData = {
+            display_name: document.getElementById('packageName').value,
+            description: document.getElementById('packageDescription').value,
+            enabled: document.getElementById('packageEnabled').checked,
+            networks: {}
+        };
+        
+        // Collect orders for each network
+        ['instagram', 'facebook', 'x', 'tiktok'].forEach(network => {
+            const container = document.getElementById(`${network}Orders`);
+            const orders = [];
+            
+            Array.from(container.children).forEach(orderDiv => {
+                if (orderDiv.id && orderDiv.id.includes('packageOrder_')) {
+                    const order = this.extractOrderDataFromDiv(orderDiv);
+                    if (order) orders.push(order);
+                }
+            });
+            
+            if (orders.length > 0) {
+                packageData.networks[network] = orders;
+            }
+        });
+        
+        try {
+            let response;
+            if (this.currentEditPackage) {
+                // Update existing package
+                response = await fetch(`/api/packages/${this.currentEditPackage.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(packageData)
+                });
+            } else {
+                // Create new package
+                response = await fetch('/api/packages', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(packageData)
+                });
+            }
+            
+            if (response.ok) {
+                const result = await response.json();
+                this.showNotification(
+                    this.currentEditPackage ? 'Package updated successfully' : 'Package created successfully', 
+                    'success'
+                );
+                this.closePackageModal();
+                await this.loadPackages();
+            } else {
+                const error = await response.json();
+                this.showNotification(error.error || 'Error saving package', 'error');
+            }
+        } catch (error) {
+            console.error('Error saving package:', error);
+            this.showNotification('Error saving package', 'error');
+        }
+    }
+    
+    extractOrderDataFromDiv(orderDiv) {
+        const serviceSearch = orderDiv.querySelector('.package-service-search');
+        const serviceId = orderDiv.querySelector('.package-service-id');
+        
+        if (!serviceSearch.value.trim() || !serviceId.value) {
+            return null; // Skip incomplete orders
+        }
+        
+        const data = {
+            service_id: parseInt(serviceId.value),
+            service_name: serviceSearch.value,
+            quantity: parseInt(orderDiv.querySelector('.package-quantity').value),
+            use_llm_generation: false,
+            comment_directives: null,
+            comment_count: null,
+            use_hashtags: false,
+            use_emojis: false,
+            custom_comments: ''
+        };
+        
+        // Extract comment-specific data if present
+        const llmCheckbox = orderDiv.querySelector('.package-use-llm');
+        if (llmCheckbox) {
+            data.use_llm_generation = llmCheckbox.checked;
+            data.comment_directives = orderDiv.querySelector('.package-comment-directives')?.value || null;
+            data.comment_count = parseInt(orderDiv.querySelector('.package-comment-count')?.value) || null;
+            data.use_hashtags = orderDiv.querySelector('.package-use-hashtags')?.checked || false;
+            data.use_emojis = orderDiv.querySelector('.package-use-emojis')?.checked || false;
+            data.custom_comments = orderDiv.querySelector('.package-custom-comments')?.value || '';
+        }
+        
+        return data;
+    }
+    
+    async handlePackageExecuteSubmit(e) {
+        e.preventDefault();
+        
+        const packageId = document.getElementById('packageSelect').value;
+        const targetUrl = document.getElementById('packageTargetUrl').value;
+        
+        if (!packageId || !targetUrl) {
+            this.showNotification('Please select a package and enter a target URL', 'error');
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/packages/${packageId}/execute`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ target_url: targetUrl })
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                this.showNotification(
+                    `Package executed! Network: ${result.detected_network}. ${result.successful_orders.length} orders created.`,
+                    'success'
+                );
+                
+                // Clear form
+                document.getElementById('packageExecuteForm').reset();
+                
+                // Refresh balance and history
+                await this.loadJAPBalance();
+                if (this.currentTab === 'history') {
+                    await this.loadHistory();
+                }
+            } else {
+                const error = await response.json();
+                this.showNotification(error.error || 'Error executing package', 'error');
+            }
+        } catch (error) {
+            console.error('Error executing package:', error);
+            this.showNotification('Error executing package', 'error');
+        }
+    }
+    
+    editPackage(packageId) {
+        this.openPackageModal(packageId);
+    }
+    
+    async deletePackage(packageId) {
+        const pkg = this.packages.find(p => p.id === packageId);
+        if (!pkg) return;
+        
+        if (!confirm(`Are you sure you want to delete package "${pkg.display_name}"? This action cannot be undone.`)) {
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/packages/${packageId}`, {
+                method: 'DELETE'
+            });
+            
+            if (response.ok) {
+                this.showNotification('Package deleted successfully', 'success');
+                await this.loadPackages();
+            } else {
+                const error = await response.json();
+                this.showNotification(error.error || 'Error deleting package', 'error');
+            }
+        } catch (error) {
+            console.error('Error deleting package:', error);
+            this.showNotification('Error deleting package', 'error');
+        }
+    }
+    
+    async viewPackageExecutions(packageId) {
+        // TODO: Implement package executions view
+        console.log('View executions for package:', packageId);
+        this.showNotification('Package executions view coming soon', 'info');
+    }
+    
+    async handlePackageServiceSearch(e, network, orderId) {
+        const searchValue = e.target.value.trim();
+        const orderDiv = document.getElementById(`packageOrder_${network}_${orderId}`);
+        const serviceId = orderDiv.querySelector('.package-service-id');
+        
+        if (!searchValue) {
+            serviceId.value = '';
+            this.hidePackageServiceDropdown(e, network, orderId);
+            return;
+        }
+        
+        // If it's a number, treat as service ID
+        if (/^\d+$/.test(searchValue)) {
+            // Look up service by ID
+            if (!this.allServices || this.allServices.length === 0) {
+                await this.loadAllJAPServices();
+            }
+            
+            const service = this.allServices.find(s => s.service_id.toString() === searchValue);
+            if (service) {
+                serviceId.value = service.service_id;
+                e.target.value = service.name;
+                this.hidePackageServiceDropdown(e, network, orderId);
+                return;
+            }
+        }
+        
+        // Search by name
+        this.showPackageServiceDropdown(e, network, orderId);
+    }
+    
+    async loadAllJAPServices() {
+        try {
+            // Load services for all platforms
+            const platforms = ['instagram', 'facebook', 'x', 'tiktok'];
+            this.allServices = [];
+            
+            for (const platform of platforms) {
+                const response = await fetch(`/api/jap/services/${platform}`);
+                const services = await response.json();
+                
+                if (!services.error) {
+                    // Flatten all services from all action types
+                    Object.values(services).forEach(actionServices => {
+                        if (Array.isArray(actionServices)) {
+                            this.allServices.push(...actionServices.map(s => ({...s, platform})));
+                        }
+                    });
+                }
+            }
+        } catch (error) {
+            console.error('Error loading JAP services:', error);
+        }
+    }
+    
+    showPackageServiceDropdown(e, network, orderId) {
+        const searchValue = e.target.value.trim();
+        if (!searchValue) return;
+        
+        const orderDiv = document.getElementById(`packageOrder_${network}_${orderId}`);
+        if (!orderDiv) {
+            console.error(`Order div not found: packageOrder_${network}_${orderId}`);
+            return;
+        }
+        
+        let dropdown = orderDiv.querySelector('.package-service-dropdown');
+        
+        if (!dropdown) {
+            dropdown = document.createElement('div');
+            dropdown.className = 'package-service-dropdown absolute z-10 w-full bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto hidden';
+            dropdown.style.top = '100%';
+            dropdown.style.left = '0';
+            
+            const serviceContainer = orderDiv.querySelector('.package-service-search').parentNode;
+            if (!serviceContainer) {
+                console.error(`Service container not found in order div: packageOrder_${network}_${orderId}`);
+                return;
+            }
+            serviceContainer.style.position = 'relative';
+            serviceContainer.appendChild(dropdown);
+        }
+        
+        // Filter services by search term
+        if (this.allServices && this.allServices.length > 0) {
+            const filteredServices = this.allServices.filter(service => 
+                service.name.toLowerCase().includes(searchValue.toLowerCase()) ||
+                service.service_id.toString().includes(searchValue)
+            ).slice(0, 20); // Limit to 20 results
+            
+            dropdown.innerHTML = filteredServices.map(service => `
+                <div class="px-3 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100" 
+                     data-service-id="${service.service_id}" data-service-name="${service.name}">
+                    <div class="font-medium text-sm">${service.name}</div>
+                    <div class="text-xs text-gray-500">ID: ${service.service_id} | ${service.platform} | Rate: $${service.rate}</div>
+                </div>
+            `).join('');
+            
+            // Bind click events
+            dropdown.querySelectorAll('[data-service-id]').forEach(item => {
+                item.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    const serviceId = item.getAttribute('data-service-id');
+                    const serviceName = item.getAttribute('data-service-name');
+                    
+                    orderDiv.querySelector('.package-service-search').value = serviceName;
+                    orderDiv.querySelector('.package-service-id').value = serviceId;
+                    
+                    // Generate dynamic parameters for the selected service
+                    const service = this.findServiceById(serviceId);
+                    if (service) {
+                        this.generatePackageOrderDynamicParams(network, orderId, service);
+                    }
+                    
+                    this.hidePackageServiceDropdown(e, network, orderId);
+                });
+            });
+        }
+        
+        dropdown.classList.remove('hidden');
+    }
+    
+    hidePackageServiceDropdown(e, network, orderId) {
+        setTimeout(() => {
+            const orderDiv = document.getElementById(`packageOrder_${network}_${orderId}`);
+            if (orderDiv) {
+                const dropdown = orderDiv.querySelector('.package-service-dropdown');
+                if (dropdown) {
+                    dropdown.classList.add('hidden');
+                }
+            }
+        }, 150);
+    }
+    
+    findServiceById(serviceId) {
+        if (!this.allServices || this.allServices.length === 0) {
+            return null;
+        }
+        return this.allServices.find(s => s.service_id.toString() === serviceId.toString());
+    }
+    
+    generatePackageOrderDynamicParams(network, orderId, service, existingData = {}) {
+        const orderDiv = document.getElementById(`packageOrder_${network}_${orderId}`);
+        const container = orderDiv.querySelector('.package-dynamic-params');
+        container.innerHTML = '';
+        
+        // Quantity parameter (always present)
+        const quantityDiv = document.createElement('div');
+        quantityDiv.className = 'mb-2';
+        quantityDiv.innerHTML = `
+            <label class="block text-xs font-medium text-gray-700 mb-1">Quantity *</label>
+            <input type="number" class="package-quantity w-full px-2 py-1 border border-gray-300 rounded text-xs" 
+                   min="${service.min_quantity}" max="${service.max_quantity}" 
+                   value="${existingData.quantity || service.min_quantity}" required>
+            <p class="text-xs text-gray-400 mt-1">Min: ${service.min_quantity}, Max: ${service.max_quantity}</p>
+        `;
+        container.appendChild(quantityDiv);
+        
+        // Comment-specific parameters
+        if (service.name.toLowerCase().includes('comment')) {
+            this.generatePackageCommentParams(container, service, existingData);
+        }
+    }
+    
+    updatePackageOrderNumbers(network) {
+        const container = document.getElementById(`${network}Orders`);
+        if (!container) return;
+        
+        const orderDivs = container.querySelectorAll('[id^="packageOrder_"]');
+        orderDivs.forEach((orderDiv, index) => {
+            const orderTitle = orderDiv.querySelector('h4');
+            if (orderTitle) {
+                orderTitle.textContent = `Order ${index + 1}`;
+            }
+        });
+    }
+    
+    generatePackageCommentParams(container, service, existingData = {}) {
+        const commentSection = document.createElement('div');
+        commentSection.className = 'border-t pt-2 mt-2';
+        commentSection.innerHTML = `
+            <div class="flex items-center gap-2 mb-2">
+                <input type="checkbox" class="package-use-llm h-3 w-3 text-blue-600 focus:ring-blue-500 border-gray-300 rounded" 
+                       ${existingData.use_llm_generation ? 'checked' : ''}>
+                <label class="text-xs font-medium text-gray-700">
+                    <i class="fas fa-robot text-blue-500 mr-1"></i>
+                    Use AI Generation
+                </label>
+            </div>
+            
+            <div class="llm-options space-y-2 ${existingData.use_llm_generation ? '' : 'hidden'}">
+                <div>
+                    <label class="block text-xs font-medium text-gray-700 mb-1">Instructions</label>
+                    <textarea class="package-comment-directives w-full px-2 py-1 border border-gray-300 rounded text-xs" 
+                              rows="2" placeholder="Generate engaging comments...">${existingData.comment_directives || ''}</textarea>
+                </div>
+                
+                <div class="grid grid-cols-2 gap-2">
+                    <div class="flex items-center">
+                        <label class="flex items-center">
+                            <input type="checkbox" class="package-use-hashtags h-3 w-3 text-blue-600 focus:ring-blue-500 border-gray-300 rounded" 
+                                   ${existingData.use_hashtags ? 'checked' : ''}>
+                            <span class="ml-2 text-xs text-gray-700">Hashtags</span>
+                        </label>
+                    </div>
+                    <div class="flex items-center">
+                        <label class="flex items-center">
+                            <input type="checkbox" class="package-use-emojis h-3 w-3 text-blue-600 focus:ring-blue-500 border-gray-300 rounded" 
+                                   ${existingData.use_emojis ? 'checked' : ''}>
+                            <span class="ml-2 text-xs text-gray-700">Emojis</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="custom-comments-section mt-2 ${existingData.use_llm_generation ? 'hidden' : ''}">
+                <label class="block text-xs font-medium text-gray-700 mb-1">Custom Comments</label>
+                <textarea class="package-custom-comments w-full px-2 py-1 border border-gray-300 rounded text-xs" 
+                          rows="2" placeholder="One per line...">${existingData.custom_comments || ''}</textarea>
+                <p class="text-xs text-gray-400 mt-1">Leave empty for AI/random</p>
+            </div>
+        `;
+        container.appendChild(commentSection);
+        
+        // Toggle LLM options and custom comments
+        const llmCheckbox = commentSection.querySelector('.package-use-llm');
+        const llmOptions = commentSection.querySelector('.llm-options');
+        const customCommentsSection = commentSection.querySelector('.custom-comments-section');
+        
+        llmCheckbox.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                llmOptions.classList.remove('hidden');
+                customCommentsSection.classList.add('hidden');
+            } else {
+                llmOptions.classList.add('hidden');
+                customCommentsSection.classList.remove('hidden');
+            }
+        });
     }
 }
 

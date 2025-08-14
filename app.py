@@ -2373,6 +2373,575 @@ def test_llm_generation():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# Package Management API Endpoints
+
+@app.route('/api/packages', methods=['GET'])
+@smart_auth_required
+def get_packages():
+    """Get all packages with their order configurations"""
+    try:
+        conn = get_db_connection()
+        
+        # Get basic package info
+        packages = conn.execute('''
+            SELECT id, display_name, description, enabled, created_at, updated_at
+            FROM packages
+            ORDER BY display_name
+        ''').fetchall()
+        
+        result = []
+        for package in packages:
+            # Get order configurations for each network
+            orders = conn.execute('''
+                SELECT network, service_id, service_name, quantity,
+                       use_llm_generation, comment_directives, comment_count,
+                       use_hashtags, use_emojis, custom_comments, service_parameters
+                FROM package_orders
+                WHERE package_id = ?
+                ORDER BY network, service_id
+            ''', (package['id'],)).fetchall()
+            
+            # Group orders by network
+            networks = {}
+            for order in orders:
+                network = order['network']
+                if network not in networks:
+                    networks[network] = []
+                
+                networks[network].append({
+                    'service_id': order['service_id'],
+                    'service_name': order['service_name'],
+                    'quantity': order['quantity'],
+                    'use_llm_generation': bool(order['use_llm_generation']),
+                    'comment_directives': order['comment_directives'],
+                    'comment_count': order['comment_count'],
+                    'use_hashtags': bool(order['use_hashtags']),
+                    'use_emojis': bool(order['use_emojis']),
+                    'custom_comments': order['custom_comments'],
+                    'service_parameters': order['service_parameters']
+                })
+            
+            result.append({
+                'id': package['id'],
+                'display_name': package['display_name'],
+                'description': package['description'],
+                'enabled': bool(package['enabled']),
+                'created_at': package['created_at'],
+                'updated_at': package['updated_at'],
+                'networks': networks
+            })
+        
+        conn.close()
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/packages', methods=['POST'])
+@smart_auth_required
+def create_package():
+    """Create a new package with network-specific order configurations"""
+    try:
+        data = request.get_json()
+        
+        if not data or not data.get('display_name'):
+            return jsonify({'error': 'Package display name is required'}), 400
+        
+        conn = get_db_connection()
+        conn.execute("BEGIN")
+        
+        # Create package
+        cursor = conn.execute('''
+            INSERT INTO packages (display_name, description, enabled)
+            VALUES (?, ?, ?)
+        ''', (data['display_name'], data.get('description', ''), data.get('enabled', True)))
+        
+        package_id = cursor.lastrowid
+        
+        # Add network-specific orders if provided
+        networks = data.get('networks', {})
+        for network, orders in networks.items():
+            if network not in ['instagram', 'facebook', 'x', 'tiktok']:
+                conn.rollback()
+                conn.close()
+                return jsonify({'error': f'Invalid network: {network}'}), 400
+            
+            for order in orders:
+                if not all(key in order for key in ['service_id', 'service_name', 'quantity']):
+                    conn.rollback()
+                    conn.close()
+                    return jsonify({'error': 'Missing required order fields'}), 400
+                
+                conn.execute('''
+                    INSERT INTO package_orders (
+                        package_id, network, service_id, service_name, quantity,
+                        use_llm_generation, comment_directives, comment_count,
+                        use_hashtags, use_emojis, custom_comments, service_parameters
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    package_id, network, order['service_id'], order['service_name'],
+                    order['quantity'], order.get('use_llm_generation', False),
+                    order.get('comment_directives'), order.get('comment_count'),
+                    order.get('use_hashtags', False), order.get('use_emojis', False),
+                    order.get('custom_comments'), order.get('service_parameters')
+                ))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'id': package_id, 'message': 'Package created successfully'})
+        
+    except sqlite3.IntegrityError as e:
+        if 'UNIQUE constraint failed' in str(e):
+            return jsonify({'error': 'Package name already exists'}), 400
+        return jsonify({'error': str(e)}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/packages/<int:package_id>', methods=['PUT'])
+@smart_auth_required
+def update_package(package_id):
+    """Update a package and its order configurations"""
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'error': 'Request body required'}), 400
+        
+        conn = get_db_connection()
+        conn.execute("BEGIN")
+        
+        # Update package basic info
+        conn.execute('''
+            UPDATE packages 
+            SET display_name = ?, description = ?, enabled = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ''', (data.get('display_name'), data.get('description'), data.get('enabled'), package_id))
+        
+        # If networks data provided, update order configurations
+        if 'networks' in data:
+            # Remove existing orders
+            conn.execute('DELETE FROM package_orders WHERE package_id = ?', (package_id,))
+            
+            # Add updated orders
+            networks = data['networks']
+            for network, orders in networks.items():
+                if network not in ['instagram', 'facebook', 'x', 'tiktok']:
+                    conn.rollback()
+                    conn.close()
+                    return jsonify({'error': f'Invalid network: {network}'}), 400
+                
+                for order in orders:
+                    if not all(key in order for key in ['service_id', 'service_name', 'quantity']):
+                        conn.rollback()
+                        conn.close()
+                        return jsonify({'error': 'Missing required order fields'}), 400
+                    
+                    conn.execute('''
+                        INSERT INTO package_orders (
+                            package_id, network, service_id, service_name, quantity,
+                            use_llm_generation, comment_directives, comment_count,
+                            use_hashtags, use_emojis, custom_comments, service_parameters
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        package_id, network, order['service_id'], order['service_name'],
+                        order['quantity'], order.get('use_llm_generation', False),
+                        order.get('comment_directives'), order.get('comment_count'),
+                        order.get('use_hashtags', False), order.get('use_emojis', False),
+                        order.get('custom_comments'), order.get('service_parameters')
+                    ))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'message': 'Package updated successfully'})
+        
+    except sqlite3.IntegrityError as e:
+        if 'UNIQUE constraint failed' in str(e):
+            return jsonify({'error': 'Package name already exists'}), 400
+        return jsonify({'error': str(e)}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/packages/<int:package_id>', methods=['DELETE'])
+@smart_auth_required
+def delete_package(package_id):
+    """Delete a package and all its configurations"""
+    try:
+        conn = get_db_connection()
+        
+        # Check if package exists
+        package = conn.execute('SELECT display_name FROM packages WHERE id = ?', (package_id,)).fetchone()
+        if not package:
+            conn.close()
+            return jsonify({'error': 'Package not found'}), 404
+        
+        # Delete package (cascade will handle related records)
+        conn.execute('DELETE FROM packages WHERE id = ?', (package_id,))
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'message': f'Package "{package["display_name"]}" deleted successfully'})
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/packages/<int:package_id>/execute', methods=['POST'])
+@smart_auth_required
+def execute_package(package_id):
+    """Execute a package by auto-detecting network from URL and routing orders"""
+    try:
+        data = request.get_json()
+        
+        if not data or not data.get('target_url'):
+            return jsonify({'error': 'Target URL is required'}), 400
+        
+        target_url = data['target_url']
+        
+        # Detect network from URL
+        detected_network = detect_network_from_url(target_url)
+        if not detected_network:
+            return jsonify({'error': 'Could not detect social network from URL'}), 400
+        
+        conn = get_db_connection()
+        conn.execute("BEGIN")
+        
+        # Get package info
+        package = conn.execute('SELECT display_name, enabled FROM packages WHERE id = ?', (package_id,)).fetchone()
+        if not package:
+            conn.close()
+            return jsonify({'error': 'Package not found'}), 404
+        
+        if not package['enabled']:
+            conn.close()
+            return jsonify({'error': 'Package is disabled'}), 400
+        
+        # Get orders for detected network
+        package_orders = conn.execute('''
+            SELECT id, service_id, service_name, quantity, use_llm_generation,
+                   comment_directives, comment_count, use_hashtags, use_emojis,
+                   custom_comments, service_parameters
+            FROM package_orders
+            WHERE package_id = ? AND network = ?
+            ORDER BY service_id
+        ''', (package_id, detected_network)).fetchall()
+        
+        if not package_orders:
+            conn.close()
+            return jsonify({'error': f'No orders configured for {detected_network} network in this package'}), 400
+        
+        # Create package execution record
+        cursor = conn.execute('''
+            INSERT INTO package_executions (
+                package_id, target_url, detected_network, status, total_orders, execution_start
+            ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ''', (package_id, target_url, detected_network, 'processing', len(package_orders)))
+        
+        package_execution_id = cursor.lastrowid
+        
+        # Execute each order
+        successful_orders = []
+        failed_orders = []
+        
+        for package_order in package_orders:
+            try:
+                # Handle LLM comment generation if enabled
+                custom_comments = package_order['custom_comments']
+                if package_order['use_llm_generation'] and 'comment' in package_order['service_name'].lower():
+                    log_console('LLM', f'Package Execute: Generating {package_order["quantity"]} AI comments for {package_order["service_name"]}', 'pending')
+                    
+                    llm_result = llm_client.generate_comments(
+                        post_content=target_url,
+                        comment_count=package_order['comment_count'] or package_order['quantity'],
+                        custom_input=package_order['comment_directives'] or 'Generate engaging comments',
+                        use_hashtags=package_order['use_hashtags'],
+                        use_emojis=package_order['use_emojis']
+                    )
+                    
+                    if llm_result['success']:
+                        custom_comments = '\n'.join(llm_result['comments'])
+                        log_console('LLM', f'Package Execute: Generated {len(llm_result["comments"])} comments successfully', 'success')
+                    else:
+                        log_console('LLM', f'Package Execute: AI comment generation failed: {llm_result["error"]}', 'error')
+                        failed_orders.append({
+                            'package_order_id': package_order['id'],
+                            'service_name': package_order['service_name'],
+                            'error': f'AI comment generation failed: {llm_result["error"]}'
+                        })
+                        continue
+                
+                # Pre-create execution history record for screenshot linkage
+                execution_cursor = conn.execute('''
+                    INSERT INTO execution_history 
+                    (jap_order_id, execution_type, platform, target_url, service_id, service_name, 
+                     quantity, cost, status, parameters, account_username)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    '',  # Will update with actual order ID
+                    'package',
+                    detected_network,
+                    target_url,
+                    package_order['service_id'],
+                    package_order['service_name'],
+                    package_order['quantity'],
+                    0,  # Cost will be updated from JAP response
+                    'pending',
+                    json.dumps({
+                        'package_id': package_id,
+                        'package_name': package['display_name'],
+                        'use_llm_generation': package_order['use_llm_generation']
+                    }),
+                    f'Package: {package["display_name"]}'
+                ))
+                
+                execution_id = execution_cursor.lastrowid
+                
+                # Capture before screenshot
+                try:
+                    log_console('SCREENSHOT', f'Package Execute: Capturing before screenshot for {target_url}', 'info')
+                    before_result = screenshot_client.capture_screenshot(
+                        url=target_url,
+                        platform=detected_network,
+                        execution_id=execution_id,
+                        screenshot_type='before'
+                    )
+                    
+                    if before_result['success']:
+                        log_console('SCREENSHOT', f'Package Execute: Before screenshot captured successfully', 'success')
+                    else:
+                        log_console('SCREENSHOT', f'Package Execute: Before screenshot failed: {before_result.get("error", "Unknown error")}', 'error')
+                        
+                except Exception as e:
+                    log_console('SCREENSHOT', f'Package Execute: Screenshot setup failed: {str(e)}', 'error')
+                
+                # Create JAP order
+                order_response = jap_client.create_order(
+                    service_id=package_order['service_id'],
+                    link=target_url,
+                    quantity=package_order['quantity'],
+                    custom_comments=custom_comments
+                )
+                
+                if 'error' in order_response:
+                    # Update execution with failure
+                    conn.execute('UPDATE execution_history SET status = ?, jap_order_id = ? WHERE id = ?', 
+                               ('failed', f'FAILED_{int(time.time())}', execution_id))
+                    
+                    failed_orders.append({
+                        'package_order_id': package_order['id'],
+                        'service_name': package_order['service_name'],
+                        'error': order_response['error']
+                    })
+                    continue
+                
+                # Update execution with success
+                conn.execute('UPDATE execution_history SET status = ?, jap_order_id = ? WHERE id = ?', 
+                           ('pending', order_response['order'], execution_id))
+                
+                # Create package execution order link
+                conn.execute('''
+                    INSERT INTO package_execution_orders (
+                        package_execution_id, execution_history_id, package_order_id, jap_order_id, status
+                    ) VALUES (?, ?, ?, ?, ?)
+                ''', (package_execution_id, execution_id, package_order['id'], order_response['order'], 'pending'))
+                
+                successful_orders.append({
+                    'package_order_id': package_order['id'],
+                    'service_name': package_order['service_name'],
+                    'jap_order_id': order_response['order'],
+                    'execution_id': execution_id
+                })
+                
+                log_console('SCREENSHOT', f'Package Execute: After screenshot will be triggered when order status becomes completed', 'info')
+                
+            except Exception as e:
+                failed_orders.append({
+                    'package_order_id': package_order['id'],
+                    'service_name': package_order['service_name'],
+                    'error': str(e)
+                })
+        
+        # Update package execution status
+        if failed_orders and not successful_orders:
+            # All orders failed
+            status = 'failed'
+            error_message = f'All {len(failed_orders)} orders failed'
+        elif failed_orders:
+            # Partial success
+            status = 'completed'
+            error_message = f'{len(failed_orders)} of {len(package_orders)} orders failed'
+        else:
+            # All successful
+            status = 'completed' if successful_orders else 'failed'
+            error_message = None
+        
+        conn.execute('''
+            UPDATE package_executions 
+            SET status = ?, completed_orders = ?, failed_orders = ?, error_message = ?, execution_end = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ''', (status, len(successful_orders), len(failed_orders), error_message, package_execution_id))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'package_execution_id': package_execution_id,
+            'detected_network': detected_network,
+            'successful_orders': successful_orders,
+            'failed_orders': failed_orders,
+            'message': f'Package execution {status}. {len(successful_orders)} orders created successfully.'
+        })
+        
+    except Exception as e:
+        if 'conn' in locals():
+            conn.rollback()
+            conn.close()
+        return jsonify({'error': str(e)}), 500
+
+def detect_network_from_url(url):
+    """Detect social network from URL"""
+    url = url.lower()
+    
+    # Instagram detection
+    if 'instagram.com' in url:
+        return 'instagram'
+    
+    # Facebook detection  
+    if 'facebook.com' in url or 'fb.com' in url:
+        return 'facebook'
+    
+    # Twitter/X detection
+    if 'twitter.com' in url or 'x.com' in url:
+        return 'x'
+    
+    # TikTok detection
+    if 'tiktok.com' in url:
+        return 'tiktok'
+    
+    return None
+
+@app.route('/api/packages/<int:package_id>/executions', methods=['GET'])
+@smart_auth_required
+def get_package_executions(package_id):
+    """Get execution history for a package"""
+    try:
+        conn = get_db_connection()
+        
+        # Get package basic info
+        package = conn.execute('SELECT display_name FROM packages WHERE id = ?', (package_id,)).fetchone()
+        if not package:
+            conn.close()
+            return jsonify({'error': 'Package not found'}), 404
+        
+        # Get executions with details
+        executions = conn.execute('''
+            SELECT pe.id, pe.target_url, pe.detected_network, pe.status, pe.total_orders,
+                   pe.completed_orders, pe.failed_orders, pe.error_message,
+                   pe.execution_start, pe.execution_end, pe.created_at,
+                   COUNT(peo.id) as actual_orders
+            FROM package_executions pe
+            LEFT JOIN package_execution_orders peo ON pe.id = peo.package_execution_id
+            WHERE pe.package_id = ?
+            GROUP BY pe.id
+            ORDER BY pe.created_at DESC
+        ''', (package_id,)).fetchall()
+        
+        result = []
+        for execution in executions:
+            # Get individual order details
+            orders = conn.execute('''
+                SELECT peo.jap_order_id, peo.status, eh.service_name, eh.quantity,
+                       eh.cost, eh.created_at, po.service_name as package_service_name
+                FROM package_execution_orders peo
+                JOIN execution_history eh ON peo.execution_history_id = eh.id
+                JOIN package_orders po ON peo.package_order_id = po.id
+                WHERE peo.package_execution_id = ?
+                ORDER BY eh.created_at
+            ''', (execution['id'],)).fetchall()
+            
+            result.append({
+                'id': execution['id'],
+                'target_url': execution['target_url'],
+                'detected_network': execution['detected_network'],
+                'status': execution['status'],
+                'total_orders': execution['total_orders'],
+                'completed_orders': execution['completed_orders'],
+                'failed_orders': execution['failed_orders'],
+                'actual_orders': execution['actual_orders'],
+                'error_message': execution['error_message'],
+                'execution_start': execution['execution_start'],
+                'execution_end': execution['execution_end'],
+                'created_at': execution['created_at'],
+                'orders': [dict(order) for order in orders]
+            })
+        
+        conn.close()
+        return jsonify({
+            'package_name': package['display_name'],
+            'executions': result
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/packages/executions', methods=['GET'])
+@smart_auth_required
+def get_all_package_executions():
+    """Get all package executions across all packages"""
+    try:
+        conn = get_db_connection()
+        
+        limit = int(request.args.get('limit', 50))
+        offset = int(request.args.get('offset', 0))
+        status_filter = request.args.get('status')
+        network_filter = request.args.get('network')
+        
+        # Build query with filters
+        where_conditions = []
+        params = []
+        
+        if status_filter:
+            where_conditions.append('pe.status = ?')
+            params.append(status_filter)
+        
+        if network_filter:
+            where_conditions.append('pe.detected_network = ?')
+            params.append(network_filter)
+        
+        where_clause = 'WHERE ' + ' AND '.join(where_conditions) if where_conditions else ''
+        
+        executions = conn.execute(f'''
+            SELECT pe.id, pe.package_id, p.display_name as package_name,
+                   pe.target_url, pe.detected_network, pe.status, pe.total_orders,
+                   pe.completed_orders, pe.failed_orders, pe.error_message,
+                   pe.execution_start, pe.execution_end, pe.created_at
+            FROM package_executions pe
+            JOIN packages p ON pe.package_id = p.id
+            {where_clause}
+            ORDER BY pe.created_at DESC
+            LIMIT ? OFFSET ?
+        ''', params + [limit, offset]).fetchall()
+        
+        # Get total count
+        count_result = conn.execute(f'''
+            SELECT COUNT(*) as total
+            FROM package_executions pe
+            JOIN packages p ON pe.package_id = p.id
+            {where_clause}
+        ''', params).fetchone()
+        
+        conn.close()
+        
+        return jsonify({
+            'executions': [dict(execution) for execution in executions],
+            'total': count_result['total'],
+            'limit': limit,
+            'offset': offset
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 
 def create_rss_feed_for_account(account_id: int, platform: str, username: str) -> dict:
     """Helper function to create RSS feed for a new account"""
