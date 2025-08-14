@@ -2,6 +2,7 @@ import requests
 import json
 import sqlite3
 import time
+import os
 from datetime import datetime
 import logging
 
@@ -113,10 +114,12 @@ class ScreenshotClient:
             }
         
         try:
-            # Get GoLogin settings
+            # Get GoLogin settings - fall back to environment variable if database value is empty
             gologin_api_key = settings.get('gologin_api_key')
             if not gologin_api_key:
-                raise ValueError("GoLogin API key not configured")
+                gologin_api_key = os.getenv('GOLOGIN_API_KEY')
+            if not gologin_api_key:
+                raise ValueError("GoLogin API key not configured (check both database settings and GOLOGIN_API_KEY environment variable)")
                 
             profile_id = self.get_profile_id_for_platform(platform)
             
