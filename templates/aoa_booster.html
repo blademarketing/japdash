@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AOA Booster</title>
+    <title>SM Booster</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -228,10 +228,10 @@
         <!-- Header -->
         <div class="text-center mb-4 sm:mb-6 lg:mb-8 flex-shrink-0">
             <div class="scanning-line mb-2 sm:mb-4">
-                <h1 class="title-font text-3xl sm:text-4xl lg:text-5xl font-black text-white logo-glow mb-1 sm:mb-2 lg:mb-3">AOA BOOSTER</h1>
+                <h1 class="title-font text-3xl sm:text-4xl lg:text-5xl font-black text-white logo-glow mb-1 sm:mb-2 lg:mb-3">SM BOOSTER</h1>
             </div>
             <p class="text-gray-400 text-xs sm:text-sm uppercase tracking-wider font-medium px-4">
-                <span class="text-green-400">●</span> NETWORK DETECTION & PACKAGE EXECUTION 
+                <span class="text-green-400">●</span> WHERE SOCIAL MEETS SUCCESS 
                 <span class="text-green-400">●</span>
             </p>
             <div class="w-16 sm:w-20 h-0.5 bg-gradient-to-r from-transparent via-green-400 to-transparent mx-auto mt-2 sm:mt-4"></div>
@@ -253,7 +253,7 @@
                 <!-- Package Selection -->
                 <div class="space-y-1 sm:space-y-2">
                     <label class="block text-gray-300 text-xs font-semibold uppercase tracking-wider mb-2 sm:mb-3">
-                        <i class="fas fa-cube mr-2 text-blue-400"></i>OPERATION PACKAGE
+                        <i class="fas fa-crosshairs mr-2 text-blue-400"></i>GEOGRAPHICAL TARGETTING
                     </label>
                     <select id="packageSelect" required 
                             class="terminal-input w-full px-3 py-3 sm:px-4 sm:py-4 rounded-lg text-xs sm:text-sm appearance-none">
@@ -421,11 +421,11 @@
                     return;
                 }
 
-                select.innerHTML = '<option value="">SELECT OPERATION PACKAGE...</option>';
+                select.innerHTML = '<option value="">SELECT GEOGRAPHICAL TARGET...</option>';
                 this.packages.forEach(pkg => {
                     const option = document.createElement('option');
                     option.value = pkg.id;
-                    option.textContent = `${pkg.display_name.toUpperCase()} - ${Object.keys(pkg.networks).length} NETWORKS`;
+                    option.textContent = pkg.display_name.toUpperCase();
                     select.appendChild(option);
                 });
             }
