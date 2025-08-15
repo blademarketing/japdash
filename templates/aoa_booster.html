@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="color-scheme" content="dark only">
+    <meta name="theme-color" content="#0a0a0a">
     <title>SM Booster</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
@@ -17,16 +19,32 @@
             --glass: rgba(255, 255, 255, 0.02);
         }
 
+        html {
+            color-scheme: dark only;
+            background-color: #0a0a0a;
+        }
+
         body {
+            background-color: #0a0a0a !important;
             background: 
                 radial-gradient(circle at 20% 50%, rgba(0, 255, 136, 0.05) 0%, transparent 30%),
                 radial-gradient(circle at 80% 20%, rgba(0, 102, 204, 0.05) 0%, transparent 30%),
                 radial-gradient(circle at 40% 80%, rgba(255, 68, 68, 0.03) 0%, transparent 30%),
-                linear-gradient(135deg, var(--darker) 0%, var(--dark) 50%, #0f0f0f 100%);
+                linear-gradient(135deg, #050505 0%, #0a0a0a 50%, #0f0f0f 100%) !important;
             font-family: 'Inter', sans-serif;
             min-height: 100vh;
+            min-height: 100dvh; /* Dynamic viewport height for mobile */
             position: relative;
             overflow-x: hidden;
+            color: #ffffff;
+        }
+
+        /* Force dark mode on iOS */
+        @supports (-webkit-touch-callout: none) {
+            body {
+                background-color: #0a0a0a !important;
+                color: #ffffff !important;
+            }
         }
 
         .matrix-bg {
