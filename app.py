@@ -475,6 +475,12 @@ def logout():
 def index():
     return render_template('index.html')
 
+@app.route('/booster')
+@login_required  
+def aoa_booster():
+    """AOA Booster page - minimal package execution interface"""
+    return render_template('aoa_booster.html')
+
 @app.route('/api/accounts', methods=['GET'])
 @smart_auth_required
 def get_accounts():
@@ -1419,6 +1425,7 @@ def get_execution_stats():
                 COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending,
                 COUNT(CASE WHEN status = 'in_progress' THEN 1 END) as in_progress,
                 COUNT(CASE WHEN execution_type = 'instant' THEN 1 END) as instant_executions,
+                COUNT(CASE WHEN execution_type = 'package' THEN 1 END) as package_executions,
                 COUNT(CASE WHEN execution_type = 'rss_trigger' THEN 1 END) as rss_executions,
                 SUM(cost) as total_cost
             FROM execution_history
@@ -2384,7 +2391,7 @@ def get_packages():
         
         # Get basic package info
         packages = conn.execute('''
-            SELECT id, display_name, description, enabled, created_at, updated_at
+            SELECT id, display_name, description, created_at, updated_at
             FROM packages
             ORDER BY display_name
         ''').fetchall()
@@ -2425,7 +2432,6 @@ def get_packages():
                 'id': package['id'],
                 'display_name': package['display_name'],
                 'description': package['description'],
-                'enabled': bool(package['enabled']),
                 'created_at': package['created_at'],
                 'updated_at': package['updated_at'],
                 'networks': networks
@@ -2452,9 +2458,9 @@ def create_package():
         
         # Create package
         cursor = conn.execute('''
-            INSERT INTO packages (display_name, description, enabled)
-            VALUES (?, ?, ?)
-        ''', (data['display_name'], data.get('description', ''), data.get('enabled', True)))
+            INSERT INTO packages (display_name, description)
+            VALUES (?, ?)
+        ''', (data['display_name'], data.get('description', '')))
         
         package_id = cursor.lastrowid
         
@@ -2514,9 +2520,9 @@ def update_package(package_id):
         # Update package basic info
         conn.execute('''
             UPDATE packages 
-            SET display_name = ?, description = ?, enabled = ?, updated_at = CURRENT_TIMESTAMP
+            SET display_name = ?, description = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
-        ''', (data.get('display_name'), data.get('description'), data.get('enabled'), package_id))
+        ''', (data.get('display_name'), data.get('description'), package_id))
         
         # If networks data provided, update order configurations
         if 'networks' in data:
@@ -2607,14 +2613,10 @@ def execute_package(package_id):
         conn.execute("BEGIN")
         
         # Get package info
-        package = conn.execute('SELECT display_name, enabled FROM packages WHERE id = ?', (package_id,)).fetchone()
+        package = conn.execute('SELECT display_name FROM packages WHERE id = ?', (package_id,)).fetchone()
         if not package:
             conn.close()
             return jsonify({'error': 'Package not found'}), 404
-        
-        if not package['enabled']:
-            conn.close()
-            return jsonify({'error': 'Package is disabled'}), 400
         
         # Get orders for detected network
         package_orders = conn.execute('''
@@ -2643,7 +2645,13 @@ def execute_package(package_id):
         successful_orders = []
         failed_orders = []
         
-        for package_order in package_orders:
+        for i, package_order in enumerate(package_orders):
+            # Add a small delay between orders to reduce database lock contention
+            if i > 0:
+                log_console('SCREENSHOT', f'Package Execute: Waiting 500ms before processing order {i+1}/{len(package_orders)}', 'info')
+                time.sleep(0.5)  # 500ms delay between orders
+            
+            log_console('SCREENSHOT', f'Package Execute: Processing order {i+1}/{len(package_orders)}: {package_order["service_name"]}', 'info')
             try:
                 # Handle LLM comment generation if enabled
                 custom_comments = package_order['custom_comments']
@@ -2696,8 +2704,11 @@ def execute_package(package_id):
                 
                 execution_id = execution_cursor.lastrowid
                 
-                # Capture before screenshot
+                # Capture before screenshot with delayed execution to reduce DB lock contention
                 try:
+                    # Release the main connection temporarily to avoid lock contention
+                    conn.commit()  # Commit current transaction first
+                    
                     log_console('SCREENSHOT', f'Package Execute: Capturing before screenshot for {target_url}', 'info')
                     before_result = screenshot_client.capture_screenshot(
                         url=target_url,
@@ -2713,6 +2724,9 @@ def execute_package(package_id):
                         
                 except Exception as e:
                     log_console('SCREENSHOT', f'Package Execute: Screenshot setup failed: {str(e)}', 'error')
+                
+                # Start a new transaction for the JAP order creation
+                conn.execute("BEGIN")
                 
                 # Create JAP order
                 order_response = jap_client.create_order(

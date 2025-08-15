@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AOA Booster</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #00ff88;
+            --secondary: #0066cc;
+            --accent: #ff4444;
+            --dark: #0a0a0a;
+            --darker: #050505;
+            --glass: rgba(255, 255, 255, 0.02);
+        }
+
+        body {
+            background: 
+                radial-gradient(circle at 20% 50%, rgba(0, 255, 136, 0.05) 0%, transparent 30%),
+                radial-gradient(circle at 80% 20%, rgba(0, 102, 204, 0.05) 0%, transparent 30%),
+                radial-gradient(circle at 40% 80%, rgba(255, 68, 68, 0.03) 0%, transparent 30%),
+                linear-gradient(135deg, var(--darker) 0%, var(--dark) 50%, #0f0f0f 100%);
+            font-family: 'Inter', sans-serif;
+            min-height: 100vh;
+            position: relative;
+            overflow-x: hidden;
+        }
+
+        .matrix-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            opacity: 0.02;
+            z-index: 0;
+        }
+
+        .title-font {
+            font-family: 'Orbitron', monospace;
+        }
+
+        .glass-panel {
+            background: linear-gradient(135deg, 
+                rgba(255, 255, 255, 0.03) 0%, 
+                rgba(255, 255, 255, 0.01) 100%);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(0, 255, 136, 0.1);
+            box-shadow: 
+                0 8px 32px rgba(0, 0, 0, 0.8),
+                inset 0 1px 0 rgba(255, 255, 255, 0.05),
+                0 0 0 1px rgba(0, 255, 136, 0.03);
+        }
+
+        .terminal-input {
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid rgba(0, 255, 136, 0.2);
+            color: #00ff88;
+            font-family: 'JetBrains Mono', monospace;
+            text-shadow: 0 0 5px rgba(0, 255, 136, 0.3);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .terminal-input:focus {
+            border-color: var(--primary);
+            box-shadow: 
+                0 0 0 2px rgba(0, 255, 136, 0.1),
+                0 0 20px rgba(0, 255, 136, 0.2),
+                inset 0 1px 0 rgba(0, 255, 136, 0.1);
+            outline: none;
+        }
+
+        .cyber-button {
+            position: relative;
+            background: linear-gradient(45deg, rgba(0, 255, 136, 0.1), rgba(0, 102, 204, 0.1));
+            border: 1px solid var(--primary);
+            color: var(--primary);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            overflow: hidden;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .cyber-button::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(0, 255, 136, 0.2), transparent);
+            transition: left 0.5s;
+        }
+
+        .cyber-button:hover::before {
+            left: 100%;
+        }
+
+        .cyber-button:hover {
+            background: linear-gradient(45deg, rgba(0, 255, 136, 0.2), rgba(0, 102, 204, 0.2));
+            box-shadow: 
+                0 0 30px rgba(0, 255, 136, 0.3),
+                0 5px 20px rgba(0, 0, 0, 0.5);
+            transform: translateY(-2px);
+        }
+
+        .cyber-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .network-indicator {
+            background: rgba(0, 0, 0, 0.6);
+            border: 1px solid rgba(0, 255, 136, 0.3);
+            transition: all 0.3s ease;
+        }
+
+        .network-indicator.active {
+            border-color: var(--primary);
+            box-shadow: 0 0 15px rgba(0, 255, 136, 0.2);
+        }
+
+        .status-panel {
+            animation: slideInUp 0.5s ease-out;
+        }
+
+        .pulse {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .5; }
+        }
+
+        @keyframes slideInUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .scanning-line {
+            position: relative;
+            overflow: hidden;
+        }
+
+        .scanning-line::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--primary), transparent);
+            animation: scan 2s ease-in-out infinite;
+        }
+
+        @keyframes scan {
+            0% { left: -100%; }
+            100% { left: 100%; }
+        }
+
+        .logo-glow {
+            text-shadow: 
+                0 0 5px var(--primary),
+                0 0 10px var(--primary),
+                0 0 15px rgba(0, 255, 136, 0.5);
+        }
+
+        select {
+            background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%2300ff88' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3e%3c/svg%3e");
+            background-position: right 0.75rem center;
+            background-repeat: no-repeat;
+            background-size: 1.5em 1.5em;
+        }
+
+        select option {
+            background: rgba(0, 0, 0, 0.9);
+            color: #00ff88;
+            border: none;
+            padding: 8px 12px;
+        }
+
+        select option:hover,
+        select option:focus {
+            background: rgba(0, 255, 136, 0.1);
+            color: #00ff88;
+        }
+
+        select option:checked,
+        select option:selected {
+            background: rgba(0, 255, 136, 0.2);
+            color: #00ff88;
+        }
+
+        .grid-overlay {
+            background-image: 
+                linear-gradient(rgba(0, 255, 136, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 255, 136, 0.03) 1px, transparent 1px);
+            background-size: 50px 50px;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: -1;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center p-2 sm:p-4 py-4 sm:py-6 relative">
+    <!-- Grid Overlay -->
+    <div class="grid-overlay"></div>
+    
+    <!-- Matrix Background -->
+    <canvas class="matrix-bg" id="matrixCanvas"></canvas>
+    <div class="w-full max-w-lg z-10 flex flex-col min-h-0">
+        <!-- Header -->
+        <div class="text-center mb-4 sm:mb-6 lg:mb-8 flex-shrink-0">
+            <div class="scanning-line mb-2 sm:mb-4">
+                <h1 class="title-font text-3xl sm:text-4xl lg:text-5xl font-black text-white logo-glow mb-1 sm:mb-2 lg:mb-3">AOA BOOSTER</h1>
+            </div>
+            <p class="text-gray-400 text-xs sm:text-sm uppercase tracking-wider font-medium px-4">
+                <span class="text-green-400">●</span> NETWORK DETECTION & PACKAGE EXECUTION 
+                <span class="text-green-400">●</span>
+            </p>
+            <div class="w-16 sm:w-20 h-0.5 bg-gradient-to-r from-transparent via-green-400 to-transparent mx-auto mt-2 sm:mt-4"></div>
+        </div>
+
+        <!-- Main Form -->
+        <div class="glass-panel rounded-2xl p-4 sm:p-6 lg:p-8 shadow-2xl relative overflow-hidden flex-shrink-0">
+            <form id="boosterForm" class="space-y-4 sm:space-y-6 lg:space-y-8">
+                <!-- URL Input -->
+                <div class="space-y-1 sm:space-y-2">
+                    <label class="block text-gray-300 text-xs font-semibold uppercase tracking-wider mb-2 sm:mb-3">
+                        <i class="fas fa-crosshairs mr-2 text-green-400"></i>TARGET COORDINATES
+                    </label>
+                    <input type="url" id="targetUrl" required 
+                           class="terminal-input w-full px-3 py-3 sm:px-4 sm:py-4 rounded-lg placeholder:text-gray-500 text-xs sm:text-sm"
+                           placeholder="https://instagram.com/post/ABC123...">
+                </div>
+
+                <!-- Package Selection -->
+                <div class="space-y-1 sm:space-y-2">
+                    <label class="block text-gray-300 text-xs font-semibold uppercase tracking-wider mb-2 sm:mb-3">
+                        <i class="fas fa-cube mr-2 text-blue-400"></i>OPERATION PACKAGE
+                    </label>
+                    <select id="packageSelect" required 
+                            class="terminal-input w-full px-3 py-3 sm:px-4 sm:py-4 rounded-lg text-xs sm:text-sm appearance-none">
+                        <option value="">INITIALIZING PACKAGES...</option>
+                    </select>
+                </div>
+
+                <!-- Network Detection Display -->
+                <div id="networkDetection" class="hidden space-y-1 sm:space-y-2">
+                    <label class="block text-gray-300 text-xs font-semibold uppercase tracking-wider mb-2 sm:mb-3">
+                        <i class="fas fa-wifi mr-2 text-yellow-400"></i>NETWORK STATUS
+                    </label>
+                    <div id="detectedNetwork" class="network-indicator px-3 py-3 sm:px-4 sm:py-4 rounded-lg flex items-center justify-between">
+                        <div class="flex items-center">
+                            <i id="networkIcon" class="mr-2 sm:mr-3 text-lg sm:text-xl"></i>
+                            <span id="networkName" class="text-green-400 font-medium text-xs sm:text-sm">-</span>
+                        </div>
+                        <div class="flex space-x-1">
+                            <div class="w-1 h-3 sm:h-4 bg-green-400 pulse"></div>
+                            <div class="w-1 h-2 sm:h-3 bg-green-400 pulse" style="animation-delay: 0.1s;"></div>
+                            <div class="w-1 h-1 sm:h-2 bg-green-400 pulse" style="animation-delay: 0.2s;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Execute Button -->
+                <div class="pt-2 sm:pt-4">
+                    <button type="submit" id="executeBtn" 
+                            class="cyber-button w-full py-3 sm:py-4 px-4 sm:px-6 rounded-lg font-bold text-xs sm:text-sm relative">
+                        <i class="fas fa-rocket mr-2"></i>
+                        INITIATE OPERATION
+                    </button>
+                </div>
+            </form>
+
+            <!-- Status Display -->
+            <div id="statusDisplay" class="mt-4 sm:mt-6 lg:mt-8 hidden">
+                <div class="status-panel glass-panel p-4 sm:p-6 rounded-xl border-l-4 border-green-400">
+                    <div id="statusContent" class="text-xs sm:text-sm">
+                        <!-- Status will be shown here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="text-center mt-4 sm:mt-6 lg:mt-8 flex-shrink-0">
+            <div class="flex items-center justify-center space-x-2 sm:space-x-4 mb-2 sm:mb-4">
+                <div class="w-4 sm:w-8 h-px bg-gradient-to-r from-transparent to-gray-600"></div>
+                <button onclick="logout()" class="text-gray-500 hover:text-green-400 text-xs uppercase tracking-wider font-medium transition-all duration-300 px-2 sm:px-3 py-1 border border-gray-700 hover:border-green-400 rounded">
+                    <i class="fas fa-power-off mr-1 sm:mr-2"></i>
+                    <span class="hidden sm:inline">TERMINATE SESSION</span>
+                    <span class="sm:hidden">LOGOUT</span>
+                </button>
+                <div class="w-4 sm:w-8 h-px bg-gradient-to-l from-transparent to-gray-600"></div>
+            </div>
+            <p class="text-gray-600 text-xs font-mono">
+                CLASSIFIED - ACCESS LEVEL: <span class="text-green-400">OMEGA</span>
+            </p>
+        </div>
+    </div>
+
+    <script>
+        // Matrix Rain Animation
+        function initMatrix() {
+            const canvas = document.getElementById('matrixCanvas');
+            const ctx = canvas.getContext('2d');
+            
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            
+            const matrix = "ABCDEFGHIJKLMNOPQRSTUVWXYZ123456789@#$%^&*()*&^%+-/~{[|`]}";
+            const matrixArray = matrix.split("");
+            
+            const font_size = 10;
+            const columns = canvas.width / font_size;
+            
+            const drops = [];
+            for (let x = 0; x < columns; x++) {
+                drops[x] = 1;
+            }
+            
+            function draw() {
+                ctx.fillStyle = 'rgba(5, 5, 5, 0.04)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                ctx.fillStyle = '#00ff88';
+                ctx.font = font_size + 'px monospace';
+                
+                for (let i = 0; i < drops.length; i++) {
+                    const text = matrixArray[Math.floor(Math.random() * matrixArray.length)];
+                    ctx.fillText(text, i * font_size, drops[i] * font_size);
+                    
+                    if (drops[i] * font_size > canvas.height && Math.random() > 0.975) {
+                        drops[i] = 0;
+                    }
+                    drops[i]++;
+                }
+            }
+            
+            setInterval(draw, 35);
+            
+            window.addEventListener('resize', () => {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+            });
+        }
+
+        class AOABooster {
+            constructor() {
+                this.packages = [];
+                this.init();
+                initMatrix();
+            }
+
+            init() {
+                this.bindEvents();
+                this.loadPackages();
+                this.addTypingEffect();
+            }
+
+            addTypingEffect() {
+                const targetUrl = document.getElementById('targetUrl');
+                let placeholder = 'https://instagram.com/post/ABC123...';
+                let index = 0;
+                
+                targetUrl.placeholder = '';
+                
+                function typeWriter() {
+                    if (index < placeholder.length) {
+                        targetUrl.placeholder += placeholder.charAt(index);
+                        index++;
+                        setTimeout(typeWriter, 50);
+                    }
+                }
+                
+                setTimeout(typeWriter, 1000);
+            }
+
+            bindEvents() {
+                document.getElementById('boosterForm').addEventListener('submit', (e) => this.handleSubmit(e));
+                document.getElementById('targetUrl').addEventListener('input', (e) => this.handleUrlInput(e));
+            }
+
+            async loadPackages() {
+                try {
+                    const response = await fetch('/api/packages');
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    this.packages = await response.json();
+                    this.populatePackageSelect();
+                } catch (error) {
+                    console.error('Error loading packages:', error);
+                    this.showStatus('Failed to load packages', 'error');
+                }
+            }
+
+            populatePackageSelect() {
+                const select = document.getElementById('packageSelect');
+                
+                if (this.packages.length === 0) {
+                    select.innerHTML = '<option value="">NO PACKAGES AVAILABLE</option>';
+                    return;
+                }
+
+                select.innerHTML = '<option value="">SELECT OPERATION PACKAGE...</option>';
+                this.packages.forEach(pkg => {
+                    const option = document.createElement('option');
+                    option.value = pkg.id;
+                    option.textContent = `${pkg.display_name.toUpperCase()} - ${Object.keys(pkg.networks).length} NETWORKS`;
+                    select.appendChild(option);
+                });
+            }
+
+            handleUrlInput(e) {
+                const url = e.target.value.trim();
+                
+                if (!url) {
+                    document.getElementById('networkDetection').classList.add('hidden');
+                    return;
+                }
+
+                const network = this.detectNetwork(url);
+                if (network) {
+                    this.showDetectedNetwork(network);
+                } else {
+                    document.getElementById('networkDetection').classList.add('hidden');
+                }
+            }
+
+            detectNetwork(url) {
+                const urlLower = url.toLowerCase();
+                
+                if (urlLower.includes('instagram.com')) {
+                    return { name: 'INSTAGRAM', icon: 'fab fa-instagram text-pink-400', key: 'instagram' };
+                }
+                if (urlLower.includes('facebook.com') || urlLower.includes('fb.com')) {
+                    return { name: 'FACEBOOK', icon: 'fab fa-facebook text-blue-400', key: 'facebook' };
+                }
+                if (urlLower.includes('twitter.com') || urlLower.includes('x.com')) {
+                    return { name: 'X PLATFORM', icon: 'fab fa-x-twitter text-gray-300', key: 'x' };
+                }
+                if (urlLower.includes('tiktok.com')) {
+                    return { name: 'TIKTOK', icon: 'fab fa-tiktok text-red-400', key: 'tiktok' };
+                }
+                
+                return null;
+            }
+
+            showDetectedNetwork(network) {
+                const detection = document.getElementById('networkDetection');
+                const icon = document.getElementById('networkIcon');
+                const name = document.getElementById('networkName');
+                const networkDiv = document.getElementById('detectedNetwork');
+                
+                icon.className = network.icon;
+                name.textContent = network.name;
+                networkDiv.classList.add('active');
+                detection.classList.remove('hidden');
+            }
+
+            async handleSubmit(e) {
+                e.preventDefault();
+                
+                const targetUrl = document.getElementById('targetUrl').value.trim();
+                const packageId = document.getElementById('packageSelect').value;
+                
+                if (!targetUrl || !packageId) {
+                    this.showStatus('Please fill in all fields', 'error');
+                    return;
+                }
+
+                const network = this.detectNetwork(targetUrl);
+                if (!network) {
+                    this.showStatus('Unsupported social network. Please use Instagram, Facebook, X, or TikTok URLs.', 'error');
+                    return;
+                }
+
+                const executeBtn = document.getElementById('executeBtn');
+                const originalText = executeBtn.innerHTML;
+                executeBtn.innerHTML = '<i class="fas fa-satellite-dish fa-spin mr-2"></i>OPERATION IN PROGRESS...';
+                executeBtn.disabled = true;
+                executeBtn.classList.add('opacity-50');
+
+                try {
+                    const response = await fetch(`/api/packages/${packageId}/execute`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            target_url: targetUrl
+                        })
+                    });
+
+                    const result = await response.json();
+                    
+                    if (!response.ok) {
+                        throw new Error(result.error || 'Execution failed');
+                    }
+
+                    this.showExecutionResult(result);
+                    
+                } catch (error) {
+                    console.error('Execution error:', error);
+                    this.showStatus(error.message || 'Execution failed', 'error');
+                } finally {
+                    executeBtn.innerHTML = originalText;
+                    executeBtn.disabled = false;
+                    executeBtn.classList.remove('opacity-50');
+                }
+            }
+
+            showExecutionResult(result) {
+                const successCount = result.successful_orders?.length || 0;
+                const failedCount = result.failed_orders?.length || 0;
+                const network = result.detected_network?.toUpperCase() || 'UNKNOWN';
+
+                let statusHtml = `
+                    <div class="flex items-center justify-between mb-4">
+                        <div class="flex items-center">
+                            <div class="w-3 h-3 bg-green-400 rounded-full mr-3 animate-pulse"></div>
+                            <div>
+                                <h3 class="text-green-400 font-bold text-sm uppercase tracking-wider">OPERATION COMPLETE</h3>
+                                <p class="text-gray-400 text-xs">TARGET: ${network} | SUCCESS: ${successCount} | FAILED: ${failedCount}</p>
+                            </div>
+                        </div>
+                        <i class="fas fa-shield-alt text-green-400 text-lg"></i>
+                    </div>
+                `;
+
+                if (successCount > 0) {
+                    statusHtml += `
+                        <div class="border-t border-gray-700 pt-3 mt-3">
+                            <div class="text-xs text-gray-400 font-mono">
+                                >> ORDERS DEPLOYED TO NETWORK<br>
+                                >> AUTONOMOUS PROCESSING INITIATED<br>
+                                >> MISSION STATUS: <span class="text-green-400">ACTIVE</span>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                this.showStatus(statusHtml, 'success', true);
+            }
+
+            showStatus(message, type = 'info', isHtml = false) {
+                const statusDisplay = document.getElementById('statusDisplay');
+                const statusContent = document.getElementById('statusContent');
+                
+                const colors = {
+                    success: 'bg-green-900/30 border-green-500/30 text-green-300',
+                    error: 'bg-red-900/30 border-red-500/30 text-red-300',
+                    info: 'bg-blue-900/30 border-blue-500/30 text-blue-300'
+                };
+
+                statusDisplay.className = `mt-6 ${colors[type]} rounded-lg border p-4`;
+                
+                if (isHtml) {
+                    statusContent.innerHTML = message;
+                } else {
+                    statusContent.textContent = message;
+                }
+                
+                statusDisplay.classList.remove('hidden');
+                
+                // Auto-hide after 10 seconds for success/info messages
+                if (type !== 'error') {
+                    setTimeout(() => {
+                        statusDisplay.classList.add('hidden');
+                    }, 10000);
+                }
+            }
+        }
+
+        // Initialize the app
+        const app = new AOABooster();
+
+        // Global logout function
+        function logout() {
+            if (confirm('Are you sure you want to logout?')) {
+                window.location.href = '/logout';
+            }
+        }
+    </script>
+</body>
+</html>

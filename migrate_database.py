@@ -532,6 +532,86 @@ class DatabaseMigrator:
                 conn.close()
             return False
     
+    def apply_v6_remove_packages_enabled_migration(self):
+        """Apply v6 migration: Remove enabled field from packages table"""
+        try:
+            if not os.path.exists(self.db_path):
+                print(f"❌ Database not found: {self.db_path}")
+                return False
+            
+            conn = sqlite3.connect(self.db_path)
+            conn.execute("BEGIN")
+            
+            # Create schema_migrations table if it doesn't exist
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS schema_migrations (
+                    version TEXT PRIMARY KEY,
+                    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            # Check if already applied
+            existing = conn.execute("SELECT version FROM schema_migrations WHERE version = 'v6_remove_packages_enabled'").fetchone()
+            if existing:
+                print("ℹ️ Migration v6_remove_packages_enabled already applied")
+                conn.close()
+                return True
+            
+            print("🔄 Applying v6_remove_packages_enabled migration...")
+            
+            # Check if packages table exists and has enabled column
+            table_info = conn.execute("PRAGMA table_info(packages)").fetchall()
+            has_enabled = any(col[1] == 'enabled' for col in table_info)
+            
+            if not has_enabled:
+                print("ℹ️ Packages table already does not have enabled field")
+                # Mark as applied
+                conn.execute("INSERT INTO schema_migrations (version) VALUES ('v6_remove_packages_enabled')")
+                conn.commit()
+                conn.close()
+                return True
+            
+            print("📋 Removing enabled field from packages table...")
+            
+            # Create new packages table without enabled field
+            conn.execute('''
+                CREATE TABLE packages_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    display_name TEXT NOT NULL UNIQUE,
+                    description TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            # Copy data from old table to new table (excluding enabled field)
+            conn.execute('''
+                INSERT INTO packages_new (id, display_name, description, created_at, updated_at)
+                SELECT id, display_name, description, created_at, updated_at
+                FROM packages
+            ''')
+            
+            # Drop old table and rename new table
+            conn.execute('DROP TABLE packages')
+            conn.execute('ALTER TABLE packages_new RENAME TO packages')
+            
+            # Mark migration as applied
+            conn.execute("INSERT INTO schema_migrations (version) VALUES ('v6_remove_packages_enabled')")
+            
+            conn.commit()
+            conn.close()
+            
+            print("✅ Migration v6_remove_packages_enabled completed successfully")
+            print("📋 Removed enabled field from packages table")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Migration v6_remove_packages_enabled failed: {str(e)}")
+            if 'conn' in locals():
+                conn.rollback()
+                conn.close()
+            return False
+    
     def show_database_status(self):
         """Show current database status"""
         print("\n" + "="*60)
@@ -583,12 +663,13 @@ class DatabaseMigrator:
             print("2. 🚀 Migrate to v3 (Screenshots)")
             print("3. 📦 Migrate to v4 (Packages)")
             print("4. 🔄 Migrate to v5 (Simplify Packages)")
-            print("5. 📋 List Available Backups")
-            print("6. 🔄 Restore from Backup")
-            print("7. ✅ Verify Database Integrity")
-            print("8. ❌ Exit")
+            print("5. 🧹 Migrate to v6 (Remove Package Enabled Field)")
+            print("6. 📋 List Available Backups")
+            print("7. 🔄 Restore from Backup")
+            print("8. ✅ Verify Database Integrity")
+            print("9. ❌ Exit")
             
-            choice = input("\nEnter your choice (1-8): ").strip()
+            choice = input("\nEnter your choice (1-9): ").strip()
             
             if choice == "1":
                 backup_path = self.create_backup()
@@ -675,6 +756,32 @@ class DatabaseMigrator:
                 input("\nPress Enter to continue...")
                 
             elif choice == "5":
+                print("\n🧹 Starting Migration to v6 (Remove Package Enabled Field)")
+                print("-" * 40)
+                
+                current_version = self.get_database_version(self.db_path)
+                print(f"Current version: {current_version}")
+                
+                if current_version == "v6_remove_packages_enabled":
+                    print("ℹ️ Database is already at v6. No migration needed.")
+                else:
+                    confirm = input("\n⚠️ This will modify your database. Continue? (y/N): ").strip().lower()
+                    if confirm == 'y':
+                        backup_path = self.create_backup()
+                        if backup_path:
+                            if self.apply_v6_remove_packages_enabled_migration():
+                                print("\n🎉 Migration completed successfully!")
+                                self.verify_database_integrity()
+                            else:
+                                print("\n❌ Migration failed. Database not modified.")
+                        else:
+                            print("\n❌ Could not create backup. Migration aborted.")
+                    else:
+                        print("Migration cancelled.")
+                
+                input("\nPress Enter to continue...")
+                
+            elif choice == "6":
                 backups = self.get_available_backups()
                 print(f"\n📋 Available Backups ({len(backups)})")
                 print("-" * 80)
@@ -689,7 +796,7 @@ class DatabaseMigrator:
                 
                 input("\nPress Enter to continue...")
                 
-            elif choice == "6":
+            elif choice == "7":
                 backups = self.get_available_backups()
                 if not backups:
                     print("\n❌ No backups available for restore.")
@@ -733,13 +840,13 @@ class DatabaseMigrator:
                 
                 input("\nPress Enter to continue...")
                 
-            elif choice == "7":
+            elif choice == "8":
                 print("\n✅ Verifying Database Integrity")
                 print("-" * 40)
                 self.verify_database_integrity()
                 input("\nPress Enter to continue...")
                 
-            elif choice == "8":
+            elif choice == "9":
                 print("\n👋 Goodbye!")
                 break
                 

@@ -3,7 +3,7 @@ import json
 import sqlite3
 import time
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 
 class ScreenshotClient:
@@ -35,9 +35,13 @@ class ScreenshotClient:
         return self._screenshot_api_url
         
     def get_db_connection(self):
-        """Get database connection"""
-        conn = sqlite3.connect(self.db_file)
+        """Get database connection with better concurrency handling"""
+        conn = sqlite3.connect(self.db_file, timeout=10.0)  # 10 second timeout
         conn.row_factory = sqlite3.Row
+        # Enable WAL mode for better concurrency
+        conn.execute('PRAGMA journal_mode=WAL')
+        # Set a reasonable busy timeout
+        conn.execute('PRAGMA busy_timeout=10000')  # 10 seconds
         return conn
     
     def get_gologin_settings(self):
@@ -213,87 +217,131 @@ class ScreenshotClient:
             }
     
     def _create_screenshot_record(self, execution_id, screenshot_type, url, platform, profile_id):
-        """Create initial screenshot record in database"""
-        conn = self.get_db_connection()
-        try:
-            cursor = conn.execute('''
-                INSERT INTO screenshots (
-                    execution_id, screenshot_type, url, platform, 
-                    gologin_profile_id, capture_timestamp, status
-                ) VALUES (?, ?, ?, ?, ?, ?, 'pending')
-            ''', (execution_id, screenshot_type, url, platform, profile_id, datetime.now()))
-            
-            conn.commit()
-            return cursor.lastrowid
-        finally:
-            conn.close()
+        """Create initial screenshot record in database with retry logic"""
+        for attempt in range(3):  # Try up to 3 times
+            try:
+                conn = self.get_db_connection()
+                try:
+                    cursor = conn.execute('''
+                        INSERT INTO screenshots (
+                            execution_id, screenshot_type, url, platform, 
+                            gologin_profile_id, capture_timestamp, status
+                        ) VALUES (?, ?, ?, ?, ?, ?, 'pending')
+                    ''', (execution_id, screenshot_type, url, platform, profile_id, datetime.now()))
+                    
+                    conn.commit()
+                    return cursor.lastrowid
+                finally:
+                    conn.close()
+            except sqlite3.OperationalError as e:
+                if "database is locked" in str(e) and attempt < 2:
+                    time.sleep(0.1 * (attempt + 1))  # Exponential backoff
+                    continue
+                else:
+                    raise
     
     def _update_screenshot_status(self, screenshot_id, status):
-        """Update screenshot status"""
-        conn = self.get_db_connection()
-        try:
-            conn.execute('''
-                UPDATE screenshots 
-                SET status = ?, updated_at = ? 
-                WHERE id = ?
-            ''', (status, datetime.now(), screenshot_id))
-            conn.commit()
-        finally:
-            conn.close()
+        """Update screenshot status with retry logic"""
+        for attempt in range(3):  # Try up to 3 times
+            try:
+                conn = self.get_db_connection()
+                try:
+                    conn.execute('''
+                        UPDATE screenshots 
+                        SET status = ?, updated_at = ? 
+                        WHERE id = ?
+                    ''', (status, datetime.now(), screenshot_id))
+                    conn.commit()
+                    return  # Success, exit function
+                finally:
+                    conn.close()
+            except sqlite3.OperationalError as e:
+                if "database is locked" in str(e) and attempt < 2:
+                    time.sleep(0.1 * (attempt + 1))  # Exponential backoff
+                    continue
+                else:
+                    raise
     
     def _update_screenshot_success(self, screenshot_id, screenshot_data, width, height, 
                                   duration_ms, timestamp=None):
         """Update screenshot record with successful capture data"""
-        conn = self.get_db_connection()
-        try:
-            conn.execute('''
-                UPDATE screenshots 
-                SET status = 'completed',
-                    screenshot_data = ?,
-                    dimensions_width = ?,
-                    dimensions_height = ?,
-                    capture_duration_ms = ?,
-                    capture_timestamp = ?,
-                    updated_at = ?
-                WHERE id = ?
-            ''', (
-                screenshot_data, width, height, duration_ms,
-                timestamp or datetime.now(),
-                datetime.now(),
-                screenshot_id
-            ))
-            conn.commit()
-        finally:
-            conn.close()
+        for attempt in range(3):  # Try up to 3 times
+            try:
+                conn = self.get_db_connection()
+                try:
+                    conn.execute('''
+                        UPDATE screenshots 
+                        SET status = 'completed',
+                            screenshot_data = ?,
+                            dimensions_width = ?,
+                            dimensions_height = ?,
+                            capture_duration_ms = ?,
+                            capture_timestamp = ?,
+                            updated_at = ?
+                        WHERE id = ?
+                    ''', (
+                        screenshot_data, width, height, duration_ms,
+                        timestamp or datetime.now(),
+                        datetime.now(),
+                        screenshot_id
+                    ))
+                    conn.commit()
+                    return  # Success, exit function
+                finally:
+                    conn.close()
+            except sqlite3.OperationalError as e:
+                if "database is locked" in str(e) and attempt < 2:
+                    time.sleep(0.1 * (attempt + 1))  # Exponential backoff
+                    continue
+                else:
+                    raise
     
     def _update_screenshot_failure(self, screenshot_id, error_message):
         """Update screenshot record with failure information"""
-        conn = self.get_db_connection()
-        try:
-            conn.execute('''
-                UPDATE screenshots 
-                SET status = 'failed',
-                    error_message = ?,
-                    updated_at = ?
-                WHERE id = ?
-            ''', (error_message, datetime.now(), screenshot_id))
-            conn.commit()
-        finally:
-            conn.close()
+        for attempt in range(3):  # Try up to 3 times
+            try:
+                conn = self.get_db_connection()
+                try:
+                    conn.execute('''
+                        UPDATE screenshots 
+                        SET status = 'failed',
+                            error_message = ?,
+                            updated_at = ?
+                        WHERE id = ?
+                    ''', (error_message, datetime.now(), screenshot_id))
+                    conn.commit()
+                    return  # Success, exit function
+                finally:
+                    conn.close()
+            except sqlite3.OperationalError as e:
+                if "database is locked" in str(e) and attempt < 2:
+                    time.sleep(0.1 * (attempt + 1))  # Exponential backoff
+                    continue
+                else:
+                    raise
     
     def _update_screenshot_retry(self, screenshot_id, retry_count):
         """Update screenshot retry count"""
-        conn = self.get_db_connection()
-        try:
-            conn.execute('''
-                UPDATE screenshots 
-                SET retry_count = ?,
-                    updated_at = ?
-                WHERE id = ?
-            ''', (retry_count, datetime.now(), screenshot_id))
-            conn.commit()
-        finally:
-            conn.close()
+        for attempt in range(3):  # Try up to 3 times
+            try:
+                conn = self.get_db_connection()
+                try:
+                    conn.execute('''
+                        UPDATE screenshots 
+                        SET retry_count = ?,
+                            updated_at = ?
+                        WHERE id = ?
+                    ''', (retry_count, datetime.now(), screenshot_id))
+                    conn.commit()
+                    return  # Success, exit function
+                finally:
+                    conn.close()
+            except sqlite3.OperationalError as e:
+                if "database is locked" in str(e) and attempt < 2:
+                    time.sleep(0.1 * (attempt + 1))  # Exponential backoff
+                    continue
+                else:
+                    raise
     
     def get_screenshots_for_execution(self, execution_id):
         """Get all screenshots for an execution"""

@@ -1994,10 +1994,20 @@ class SocialMediaManager {
                     <span class="inline-flex items-center px-2 py-1 text-xs rounded-full ${
                         execution.execution_type === 'instant' 
                             ? 'bg-orange-100 text-orange-800' 
+                            : execution.execution_type === 'package'
+                            ? 'bg-green-100 text-green-800'
                             : 'bg-purple-100 text-purple-800'
                     }">
-                        <i class="fas ${execution.execution_type === 'instant' ? 'fa-bolt' : 'fa-rss'} mr-1"></i>
-                        ${execution.execution_type === 'instant' ? 'Instant' : 'RSS Trigger'}
+                        <i class="fas ${
+                            execution.execution_type === 'instant' ? 'fa-bolt' : 
+                            execution.execution_type === 'package' ? 'fa-box' : 
+                            'fa-rss'
+                        } mr-1"></i>
+                        ${
+                            execution.execution_type === 'instant' ? 'Instant' :
+                            execution.execution_type === 'package' ? 'Package' :
+                            'RSS Trigger'
+                        }
                     </span>
                 </td>
                 <td class="px-3 py-2">
@@ -2146,10 +2156,28 @@ class SocialMediaManager {
             <div class="bg-white p-4 rounded-lg border">
                 <div class="flex items-center justify-between">
                     <div>
-                        <p class="text-sm font-medium text-gray-600">Instant / RSS</p>
-                        <p class="text-2xl font-bold text-gray-900">${stats.overall.instant_executions || 0} / ${stats.overall.rss_executions || 0}</p>
+                        <p class="text-sm font-medium text-gray-600">Instant</p>
+                        <p class="text-2xl font-bold text-gray-900">${stats.overall.instant_executions || 0}</p>
                     </div>
                     <i class="fas fa-bolt text-orange-500 text-xl"></i>
+                </div>
+            </div>
+            <div class="bg-white p-4 rounded-lg border">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-sm font-medium text-gray-600">Package</p>
+                        <p class="text-2xl font-bold text-gray-900">${stats.overall.package_executions || 0}</p>
+                    </div>
+                    <i class="fas fa-box text-green-500 text-xl"></i>
+                </div>
+            </div>
+            <div class="bg-white p-4 rounded-lg border">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-sm font-medium text-gray-600">RSS Trigger</p>
+                        <p class="text-2xl font-bold text-gray-900">${stats.overall.rss_executions || 0}</p>
+                    </div>
+                    <i class="fas fa-rss text-purple-500 text-xl"></i>
                 </div>
             </div>
             <div class="bg-white p-4 rounded-lg border">
@@ -3719,15 +3747,12 @@ class SocialMediaManager {
         tbody.innerHTML = this.packages.map(pkg => {
             const networkCount = Object.keys(pkg.networks).length;
             const totalOrders = Object.values(pkg.networks).reduce((sum, orders) => sum + orders.length, 0);
-            const enabledText = pkg.enabled ? 
-                '<span class="px-2 py-1 text-xs font-semibold bg-green-100 text-green-800 rounded-full">Enabled</span>' :
-                '<span class="px-2 py-1 text-xs font-semibold bg-red-100 text-red-800 rounded-full">Disabled</span>';
             
             const networkBadges = Object.keys(pkg.networks).map(network => {
                 const networkIcons = {
                     instagram: '<i class="fab fa-instagram text-pink-500"></i>',
                     facebook: '<i class="fab fa-facebook text-blue-600"></i>',
-                    x: '<i class="fab fa-x-twitter text-black"></i>',
+                    x: '<i class="fab fa-twitter text-black"></i>',
                     tiktok: '<i class="fab fa-tiktok text-black"></i>'
                 };
                 return `<span class="inline-flex items-center px-2 py-1 text-xs bg-gray-100 rounded-full mr-1">
@@ -3743,7 +3768,6 @@ class SocialMediaManager {
                         <div class="flex flex-wrap gap-1">${networkBadges}</div>
                     </td>
                     <td class="px-4 py-3 text-center font-medium">${totalOrders}</td>
-                    <td class="px-4 py-3">${enabledText}</td>
                     <td class="px-4 py-3 text-gray-600">-</td>
                     <td class="px-4 py-3">
                         <div class="flex gap-2">
@@ -3767,7 +3791,7 @@ class SocialMediaManager {
         const select = document.getElementById('packageSelect');
         select.innerHTML = '<option value="">Select a package...</option>';
         
-        this.packages.filter(pkg => pkg.enabled).forEach(pkg => {
+        this.packages.forEach(pkg => {
             const option = document.createElement('option');
             option.value = pkg.id;
             option.textContent = pkg.display_name;
@@ -3797,7 +3821,6 @@ class SocialMediaManager {
             // Populate form
             document.getElementById('packageName').value = this.currentEditPackage.display_name;
             document.getElementById('packageDescription').value = this.currentEditPackage.description || '';
-            document.getElementById('packageEnabled').checked = this.currentEditPackage.enabled;
             
             // Populate network orders
             Object.entries(this.currentEditPackage.networks).forEach(([network, orders]) => {
@@ -3821,6 +3844,17 @@ class SocialMediaManager {
         document.getElementById('packageForm').reset();
         this.clearAllPackageOrders();
         this.currentEditPackage = null;
+        
+        // Hide network subtotals
+        ['instagram', 'facebook', 'x', 'tiktok'].forEach(network => {
+            const tabContent = document.getElementById(`${network}Content`);
+            if (tabContent) {
+                const subtotalDiv = tabContent.querySelector('.network-subtotal');
+                if (subtotalDiv) {
+                    subtotalDiv.style.display = 'none';
+                }
+            }
+        });
     }
     
     clearAllPackageOrders() {
@@ -3847,7 +3881,7 @@ class SocialMediaManager {
         
         const orderId = ++this.packageOrderIdCounter;
         const orderDiv = document.createElement('div');
-        orderDiv.className = 'border border-gray-200 rounded p-2 bg-gray-50 mb-2';
+        orderDiv.className = 'border border-gray-200 rounded-lg p-3 bg-white mb-3 shadow-sm hover:shadow-md transition-shadow';
         orderDiv.id = `packageOrder_${network}_${orderId}`;
         
         // Default data or provided data
@@ -3864,19 +3898,22 @@ class SocialMediaManager {
         };
         
         orderDiv.innerHTML = `
-            <div class="flex justify-between items-center mb-2">
-                <h4 class="font-medium text-gray-800 text-xs">Order ${orderId}</h4>
-                <button type="button" onclick="app.removePackageOrder('${network}', '${orderId}')" class="text-red-500 hover:text-red-700 text-xs">
-                    <i class="fas fa-times"></i>
+            <div class="flex justify-between items-center mb-3">
+                <h4 class="font-semibold text-gray-800 text-sm">Order ${orderId}</h4>
+                <button type="button" onclick="app.removePackageOrder('${network}', '${orderId}')" class="text-gray-400 hover:text-red-500 transition-colors p-1 rounded hover:bg-red-50" title="Remove Order">
+                    <i class="fas fa-times text-xs"></i>
                 </button>
             </div>
             
             <!-- Service Selection -->
-            <div class="mb-2">
-                <label class="block text-xs font-medium text-gray-700 mb-1">Service *</label>
-                <input type="text" class="package-service-search w-full px-2 py-1 border border-gray-300 rounded text-xs" 
-                       placeholder="Search service..." data-network="${network}" data-order="${orderId}" 
-                       value="${data.service_name}" required>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-gray-700 mb-2">Service *</label>
+                <div class="relative">
+                    <input type="text" class="package-service-search w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" 
+                           placeholder="Search for a service..." data-network="${network}" data-order="${orderId}" 
+                           value="${data.service_name}" required>
+                    <i class="fas fa-search absolute right-3 top-3 text-gray-400 text-xs"></i>
+                </div>
                 <input type="hidden" class="package-service-id" value="${data.service_id}">
             </div>
             
@@ -3927,15 +3964,20 @@ class SocialMediaManager {
         const container = document.getElementById(`${network}Orders`);
         const emptyState = document.getElementById(`${network}EmptyState`);
         
-        orderDiv.remove();
-        
-        // Update order numbers after removal
-        this.updatePackageOrderNumbers(network);
-        
-        // Show empty state if no orders left
-        const remainingOrders = container.children.length;
-        if (remainingOrders === 1) { // Only empty state remains
-            emptyState.classList.remove('hidden');
+        if (orderDiv) {
+            orderDiv.remove();
+            
+            // Update order numbers after removal
+            this.updatePackageOrderNumbers(network);
+            
+            // Update network subtotal cost after removal
+            this.updateNetworkSubtotal(network);
+            
+            // Show empty state if no orders left (excluding the empty state itself)
+            const remainingOrderDivs = container.querySelectorAll('[id^="packageOrder_"]');
+            if (remainingOrderDivs.length === 0 && emptyState) {
+                emptyState.classList.remove('hidden');
+            }
         }
     }
     
@@ -3945,7 +3987,6 @@ class SocialMediaManager {
         const packageData = {
             display_name: document.getElementById('packageName').value,
             description: document.getElementById('packageDescription').value,
-            enabled: document.getElementById('packageEnabled').checked,
             networks: {}
         };
         
@@ -3955,7 +3996,7 @@ class SocialMediaManager {
             const orders = [];
             
             Array.from(container.children).forEach(orderDiv => {
-                if (orderDiv.id && orderDiv.id.includes('packageOrder_')) {
+                if (orderDiv.id && orderDiv.id.startsWith('packageOrder_') && !orderDiv.id.includes('EmptyState')) {
                     const order = this.extractOrderDataFromDiv(orderDiv);
                     if (order) orders.push(order);
                 }
@@ -4005,6 +4046,12 @@ class SocialMediaManager {
     extractOrderDataFromDiv(orderDiv) {
         const serviceSearch = orderDiv.querySelector('.package-service-search');
         const serviceId = orderDiv.querySelector('.package-service-id');
+        const quantityInput = orderDiv.querySelector('.package-quantity');
+        
+        // Skip if this isn't actually an order div or if required elements are missing
+        if (!serviceSearch || !serviceId || !quantityInput) {
+            return null;
+        }
         
         if (!serviceSearch.value.trim() || !serviceId.value) {
             return null; // Skip incomplete orders
@@ -4013,7 +4060,7 @@ class SocialMediaManager {
         const data = {
             service_id: parseInt(serviceId.value),
             service_name: serviceSearch.value,
-            quantity: parseInt(orderDiv.querySelector('.package-quantity').value),
+            quantity: parseInt(quantityInput.value),
             use_llm_generation: false,
             comment_directives: null,
             comment_count: null,
@@ -4133,7 +4180,9 @@ class SocialMediaManager {
                 await this.loadAllJAPServices();
             }
             
-            const service = this.allServices.find(s => s.service_id.toString() === searchValue);
+            const service = this.allServices.find(s => 
+                s.service_id.toString() === searchValue && s.platform === network
+            );
             if (service) {
                 serviceId.value = service.service_id;
                 e.target.value = service.name;
@@ -4197,11 +4246,14 @@ class SocialMediaManager {
             serviceContainer.appendChild(dropdown);
         }
         
-        // Filter services by search term
+        // Filter services by search term AND network
         if (this.allServices && this.allServices.length > 0) {
             const filteredServices = this.allServices.filter(service => 
-                service.name.toLowerCase().includes(searchValue.toLowerCase()) ||
-                service.service_id.toString().includes(searchValue)
+                // Filter by network/platform first
+                service.platform === network &&
+                // Then filter by search term
+                (service.name.toLowerCase().includes(searchValue.toLowerCase()) ||
+                service.service_id.toString().includes(searchValue))
             ).slice(0, 20); // Limit to 20 results
             
             dropdown.innerHTML = filteredServices.map(service => `
@@ -4263,19 +4315,34 @@ class SocialMediaManager {
         // Quantity parameter (always present)
         const quantityDiv = document.createElement('div');
         quantityDiv.className = 'mb-2';
+        const initialQuantity = existingData.quantity || service.min_quantity;
+        const initialCost = ((initialQuantity / 1000) * parseFloat(service.rate)).toFixed(2);
+        
         quantityDiv.innerHTML = `
             <label class="block text-xs font-medium text-gray-700 mb-1">Quantity *</label>
             <input type="number" class="package-quantity w-full px-2 py-1 border border-gray-300 rounded text-xs" 
                    min="${service.min_quantity}" max="${service.max_quantity}" 
-                   value="${existingData.quantity || service.min_quantity}" required>
-            <p class="text-xs text-gray-400 mt-1">Min: ${service.min_quantity}, Max: ${service.max_quantity}</p>
+                   value="${initialQuantity}" required>
+            <div class="flex justify-between items-center mt-1">
+                <p class="text-xs text-gray-400">Min: ${service.min_quantity}, Max: ${service.max_quantity}</p>
+                <span class="package-order-cost text-xs font-medium text-green-600">Cost: $${initialCost}</span>
+            </div>
         `;
         container.appendChild(quantityDiv);
+        
+        // Add cost update event listener
+        const quantityInput = quantityDiv.querySelector('.package-quantity');
+        quantityInput.addEventListener('input', (e) => {
+            this.updatePackageOrderCost(network, orderId, service, e.target.value);
+        });
         
         // Comment-specific parameters
         if (service.name.toLowerCase().includes('comment')) {
             this.generatePackageCommentParams(container, service, existingData);
         }
+        
+        // Update network subtotal cost
+        this.updateNetworkSubtotal(network);
     }
     
     updatePackageOrderNumbers(network) {
@@ -4291,16 +4358,86 @@ class SocialMediaManager {
         });
     }
     
+    updatePackageOrderCost(network, orderId, service, quantity) {
+        const orderDiv = document.getElementById(`packageOrder_${network}_${orderId}`);
+        const costSpan = orderDiv.querySelector('.package-order-cost');
+        
+        if (costSpan && service.rate) {
+            const cost = ((parseInt(quantity) / 1000) * parseFloat(service.rate)).toFixed(2);
+            costSpan.textContent = `Cost: $${cost}`;
+        }
+        
+        // Update network subtotal cost
+        this.updateNetworkSubtotal(network);
+    }
+    
+    updateNetworkSubtotal(network) {
+        const container = document.getElementById(`${network}Orders`);
+        if (!container) return;
+        
+        let networkTotal = 0;
+        const costSpans = container.querySelectorAll('.package-order-cost');
+        costSpans.forEach(span => {
+            const costText = span.textContent;
+            const costMatch = costText.match(/\$(\d+\.\d+)/);
+            if (costMatch) {
+                networkTotal += parseFloat(costMatch[1]);
+            }
+        });
+        
+        // Display network subtotal
+        this.displayNetworkSubtotal(network, networkTotal);
+    }
+    
+    displayNetworkSubtotal(network, subtotal) {
+        const tabContent = document.getElementById(`${network}Content`);
+        if (!tabContent) return;
+        
+        let subtotalDiv = tabContent.querySelector('.network-subtotal');
+        
+        if (!subtotalDiv && subtotal > 0) {
+            subtotalDiv = document.createElement('div');
+            subtotalDiv.className = 'network-subtotal mt-3 p-2 bg-blue-50 border border-blue-200 rounded text-center';
+            
+            // Insert after the header but before the orders
+            const headerDiv = tabContent.querySelector('.flex.justify-between.items-center');
+            if (headerDiv) {
+                headerDiv.parentNode.insertBefore(subtotalDiv, headerDiv.nextSibling);
+            } else {
+                tabContent.prepend(subtotalDiv);
+            }
+        }
+        
+        if (subtotal > 0 && subtotalDiv) {
+            const networkNames = {
+                'instagram': 'Instagram',
+                'facebook': 'Facebook', 
+                'x': 'X (Twitter)',
+                'tiktok': 'TikTok'
+            };
+            
+            subtotalDiv.innerHTML = `
+                <span class="text-xs font-medium text-blue-800">
+                    <i class="fas fa-calculator mr-1"></i>${networkNames[network]} Total: 
+                    <span class="font-bold text-blue-600">$${subtotal.toFixed(2)}</span>
+                </span>
+            `;
+            subtotalDiv.style.display = 'block';
+        } else if (subtotalDiv) {
+            subtotalDiv.style.display = 'none';
+        }
+    }
+    
     generatePackageCommentParams(container, service, existingData = {}) {
         const commentSection = document.createElement('div');
-        commentSection.className = 'border-t pt-2 mt-2';
+        commentSection.className = 'border-t border-gray-200 pt-3 mt-3';
         commentSection.innerHTML = `
-            <div class="flex items-center gap-2 mb-2">
-                <input type="checkbox" class="package-use-llm h-3 w-3 text-blue-600 focus:ring-blue-500 border-gray-300 rounded" 
+            <div class="flex items-center gap-2 mb-3">
+                <input type="checkbox" class="package-use-llm h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded" 
                        ${existingData.use_llm_generation ? 'checked' : ''}>
-                <label class="text-xs font-medium text-gray-700">
-                    <i class="fas fa-robot text-blue-500 mr-1"></i>
-                    Use AI Generation
+                <label class="text-sm font-medium text-gray-700 cursor-pointer">
+                    <i class="fas fa-robot text-blue-500 mr-2"></i>
+                    Use AI Comment Generation
                 </label>
             </div>
             
