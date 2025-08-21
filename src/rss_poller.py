@@ -42,11 +42,25 @@ class RSSPoller:
             api_key=""  # ScreenshotClient will get from settings
         )
     
-    def get_db_connection(self):
-        """Get database connection with row factory"""
-        conn = sqlite3.connect(self.database_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+    def get_db_connection(self, retries=3):
+        """Get database connection with better concurrency handling and retry logic"""
+        for attempt in range(retries):
+            try:
+                conn = sqlite3.connect(self.database_path, timeout=15.0)  # 15 second timeout
+                conn.row_factory = sqlite3.Row
+                # Enable WAL mode for better concurrency
+                conn.execute('PRAGMA journal_mode=WAL')
+                # Set a reasonable busy timeout
+                conn.execute('PRAGMA busy_timeout=15000')  # 15 seconds
+                return conn
+            except sqlite3.OperationalError as e:
+                if "database is locked" in str(e) and attempt < retries - 1:
+                    # Wait with exponential backoff
+                    wait_time = 0.1 * (2 ** attempt)
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    raise
     
     def start_polling(self):
         """Start the RSS polling service in a background thread"""
@@ -116,6 +130,9 @@ class RSSPoller:
             total_actions_triggered = 0
             errors = []
             
+            # Close connection after getting feed list to prevent long-running locks
+            conn.close()
+            
             for feed in active_feeds:
                 try:
                     result = self.poll_single_feed(dict(feed))
@@ -127,14 +144,20 @@ class RSSPoller:
                     error_msg = f"Feed {feed['id']} ({feed['title']}): {str(e)}"
                     errors.append(error_msg)
                     
-                    # Log error to database
-                    conn.execute('''
-                        INSERT INTO rss_poll_log 
-                        (feed_id, posts_found, new_posts, actions_triggered, status, error_message)
-                        VALUES (?, 0, 0, 0, 'error', ?)
-                    ''', (feed['id'], str(e)))
+                    # Log error to database with separate connection
+                    try:
+                        error_conn = self.get_db_connection()
+                        error_conn.execute('''
+                            INSERT INTO rss_poll_log 
+                            (feed_id, posts_found, new_posts, actions_triggered, status, error_message)
+                            VALUES (?, 0, 0, 0, 'error', ?)
+                        ''', (feed['id'], str(e)))
+                        error_conn.commit()
+                        error_conn.close()
+                    except Exception as log_error:
+                        print(f"Failed to log RSS error: {log_error}")
             
-            conn.commit()
+            # No commit needed since connection is already closed
             
             return {
                 'status': 'completed',
@@ -147,7 +170,9 @@ class RSSPoller:
             }
             
         finally:
-            conn.close()
+            # Connection may already be closed, check before closing
+            if 'conn' in locals() and conn:
+                conn.close()
     
     def poll_single_feed(self, feed: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -315,6 +340,9 @@ class RSSPoller:
                     WHERE account_id = ? AND is_active = 1
                 ''', (feed['account_id'],)).fetchall()
                 
+                # Close connection before executing actions to prevent nesting/locking
+                conn.close()
+                
                 # Execute each action
                 for action in actions:
                     try:
@@ -327,11 +355,16 @@ class RSSPoller:
                     except Exception as e:
                         print(f"Error executing action {action['id']}: {str(e)}")
                         self.log_console('EXEC', f'Action error: {str(e)}', 'error')
+                
+                # No need to close connection in finally block since we closed it above
+                return actions_triggered
             
             return actions_triggered
             
         finally:
-            conn.close()
+            # Connection may already be closed, so check before closing
+            if 'conn' in locals() and conn:
+                conn.close()
     
     def execute_rss_triggered_action(self, account: Dict[str, Any], action: Dict[str, Any], post: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -456,6 +489,9 @@ class RSSPoller:
             except Exception as e:
                 self.log_console('SCREENSHOT', f'RSS_TRIGGER: Screenshot setup failed: {str(e)}', 'error')
             
+            # Close connection before external API call to prevent locking
+            conn.close()
+            
             # Now create JAP order
             order_response = self.jap_client.create_order(
                 service_id=action['jap_service_id'],
@@ -463,6 +499,9 @@ class RSSPoller:
                 quantity=quantity,
                 custom_comments=custom_comments
             )
+            
+            # Reopen connection for final database operations
+            conn = self.get_db_connection()
             
             if 'error' in order_response:
                 # If order creation failed, update the execution status
@@ -491,7 +530,8 @@ class RSSPoller:
         except Exception as e:
             return {'success': False, 'error': str(e)}
         finally:
-            conn.close()
+            if 'conn' in locals() and conn:
+                conn.close()
     
     def _is_comment_service_with_llm(self, action: Dict[str, Any], parameters: Dict[str, Any]) -> bool:
         """

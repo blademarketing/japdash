@@ -145,132 +145,29 @@ llm_client = FlowiseClient(
 # Initialize screenshot client (will load settings from database)
 screenshot_client = ScreenshotClient()
 
-def get_db_connection():
-    conn = sqlite3.connect(DATABASE)
-    conn.row_factory = sqlite3.Row
-    return conn
+def get_db_connection(retries=3):
+    """Get database connection with better concurrency handling and retry logic"""
+    for attempt in range(retries):
+        try:
+            conn = sqlite3.connect(DATABASE, timeout=15.0)  # 15 second timeout
+            conn.row_factory = sqlite3.Row
+            # Enable WAL mode for better concurrency
+            conn.execute('PRAGMA journal_mode=WAL')
+            # Set a reasonable busy timeout
+            conn.execute('PRAGMA busy_timeout=15000')  # 15 seconds
+            return conn
+        except sqlite3.OperationalError as e:
+            if "database is locked" in str(e) and attempt < retries - 1:
+                # Wait with exponential backoff
+                wait_time = 0.1 * (2 ** attempt)
+                time.sleep(wait_time)
+                continue
+            else:
+                raise
 
 def check_and_apply_migrations():
-    """Check for pending migrations and apply them"""
-    conn = get_db_connection()
-    
-    # Create migrations tracking table
-    conn.execute('''
-        CREATE TABLE IF NOT EXISTS schema_migrations (
-            version TEXT PRIMARY KEY,
-            applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    # Get applied migrations
-    applied = set(row['version'] for row in conn.execute('SELECT version FROM schema_migrations').fetchall())
-    
-    # Check if v2 migration is needed (tags tables)
-    if 'v2_add_tags' not in applied:
-        print("Applying migration v2_add_tags...")
-        try:
-            # Create tags table
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS tags (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL UNIQUE,
-                    color TEXT DEFAULT '#6B7280',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            
-            # Create account_tags junction table
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS account_tags (
-                    account_id INTEGER NOT NULL,
-                    tag_id INTEGER NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    PRIMARY KEY (account_id, tag_id),
-                    FOREIGN KEY (account_id) REFERENCES accounts (id) ON DELETE CASCADE,
-                    FOREIGN KEY (tag_id) REFERENCES tags (id) ON DELETE CASCADE
-                )
-            ''')
-            
-            # Create indexes
-            conn.execute('CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(name)')
-            conn.execute('CREATE INDEX IF NOT EXISTS idx_account_tags_account_id ON account_tags(account_id)')
-            conn.execute('CREATE INDEX IF NOT EXISTS idx_account_tags_tag_id ON account_tags(tag_id)')
-            
-            # Mark migration as applied
-            conn.execute('INSERT INTO schema_migrations (version) VALUES (?)', ('v2_add_tags',))
-            conn.commit()
-            print("Migration v2_add_tags applied successfully!")
-            
-            # Log to console
-            log_console('SYSTEM', 'Database migration v2_add_tags applied (tags support)', 'success')
-        except Exception as e:
-            print(f"Error applying migration v2_add_tags: {e}")
-            conn.rollback()
-            raise
-    
-    # Check if v3 migration is needed (screenshots)
-    if 'v3_add_screenshots' not in applied:
-        print("Applying migration v3_add_screenshots...")
-        try:
-            # Create screenshots table
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS screenshots (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    execution_id INTEGER NOT NULL,
-                    screenshot_type TEXT NOT NULL,
-                    url TEXT NOT NULL,
-                    platform TEXT NOT NULL,
-                    gologin_profile_id TEXT NOT NULL,
-                    screenshot_data TEXT,
-                    file_path TEXT,
-                    dimensions_width INTEGER,
-                    dimensions_height INTEGER,
-                    capture_timestamp TIMESTAMP NOT NULL,
-                    status TEXT DEFAULT 'pending',
-                    error_message TEXT,
-                    retry_count INTEGER DEFAULT 0,
-                    capture_duration_ms INTEGER,
-                    container_id TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (execution_id) REFERENCES execution_history (id) ON DELETE CASCADE,
-                    UNIQUE(execution_id, screenshot_type)
-                )
-            ''')
-            
-            # Create indexes for performance
-            conn.execute('CREATE INDEX IF NOT EXISTS idx_screenshots_execution_id ON screenshots(execution_id)')
-            conn.execute('CREATE INDEX IF NOT EXISTS idx_screenshots_type ON screenshots(screenshot_type)')
-            conn.execute('CREATE INDEX IF NOT EXISTS idx_screenshots_status ON screenshots(status)')
-            conn.execute('CREATE INDEX IF NOT EXISTS idx_screenshots_platform ON screenshots(platform)')
-            conn.execute('CREATE INDEX IF NOT EXISTS idx_screenshots_timestamp ON screenshots(capture_timestamp)')
-            
-            # Add GoLogin settings (both old and new key names for compatibility)
-            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('gologin_api_key', '')")
-            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('gologin_api_token', '')")
-            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('gologin_facebook_profile_id', '')")
-            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('gologin_instagram_profile_id', '')")
-            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('gologin_twitter_profile_id', '')")
-            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('gologin_tiktok_profile_id', '')")
-            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('screenshot_enabled', 'true')")
-            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('screenshot_store_as_files', 'false')")
-            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('screenshot_max_retries', '3')")
-            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('screenshot_api_url', 'https://gologin.electric-marinade.com:8443')")
-            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('screenshot_api_key', '')")
-            
-            # Mark migration as applied
-            conn.execute('INSERT INTO schema_migrations (version) VALUES (?)', ('v3_add_screenshots',))
-            conn.commit()
-            print("Migration v3_add_screenshots applied successfully!")
-            
-            # Log to console
-            log_console('SYSTEM', 'Database migration v3_add_screenshots applied (screenshot support)', 'success')
-        except Exception as e:
-            print(f"Error applying migration v3_add_screenshots: {e}")
-            conn.rollback()
-            raise
-    
-    conn.close()
+    """Migrations disabled - database structure already established"""
+    pass
 
 def init_db():
     # Apply any pending migrations first

@@ -7,11 +7,11 @@ The JAP Dashboard uses SQLite as its primary database to manage social media acc
 ## Database Architecture
 
 ### Technology Stack
-- **Database Engine**: SQLite 3.x
+- **Database Engine**: SQLite 3.x with WAL mode for better concurrency
 - **File Location**: `social_media_accounts.db` (main database)
 - **Cache Database**: `jap_cache.db` (JAP service caching)
-- **Migrations**: Automatic schema migrations with version tracking
-- **Connection**: Flask-SQLite integration with connection pooling
+- **Migrations**: Schema is pre-established (migrations disabled for performance)
+- **Connection**: Enhanced SQLite connection handling with retry logic and timeouts
 
 ### Design Principles
 1. **Account-Centric**: Everything revolves around social media accounts
@@ -19,6 +19,13 @@ The JAP Dashboard uses SQLite as its primary database to manage social media acc
 3. **Complete Tracking**: Full audit trail of all executions and operations
 4. **RSS Integration**: Built-in RSS monitoring for automated triggers
 5. **Flexibility**: Support for multiple platforms and extensible action types
+
+### Performance & Concurrency Features
+- **WAL Mode**: Write-Ahead Logging enabled for better concurrent read/write performance
+- **Connection Timeout**: 15-second timeout with exponential backoff retry logic
+- **Busy Timeout**: 15-second busy timeout to handle database locks gracefully
+- **Optimized Connection Management**: Connections closed before external API calls to prevent long-running locks
+- **No Migration Overhead**: Migrations disabled for optimal startup performance
 
 ## Core Database Schema
 
